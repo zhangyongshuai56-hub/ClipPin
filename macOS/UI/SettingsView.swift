@@ -6,14 +6,18 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("通用", systemImage: "gearshape") }
+            ClipboardSettingsView()
+                .tabItem { Label("剪贴板", systemImage: "doc.on.clipboard") }
+            PrivacySettingsView()
+                .tabItem { Label("隐私", systemImage: "hand.raised") }
             AboutSettingsView()
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
-        .frame(width: 460, height: 280)
+        .frame(width: 500, height: 430)
     }
 }
 
-/// 通用设置：登录启动（SMAppService）、外观主题、快捷键展示。
+/// 通用设置：登录启动（SMAppService）、外观主题、快捷键展示、辅助功能权限。
 private struct GeneralSettingsView: View {
     @Environment(AppState.self) private var appState
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
@@ -52,6 +56,12 @@ private struct GeneralSettingsView: View {
                     WindowManager.shared.applyAppearanceToAllWindows()
                 }
             }
+            Section("快捷键") {
+                LabeledContent("打开剪贴板", value: HotKeyCombo.defaultOpenClipboard.displayString)
+                Text("自定义全局快捷键将在后续版本提供。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Section("权限") {
                 LabeledContent("辅助功能（自动粘贴）", value: accessibilityTrusted ? "✓ 已授权" : "⚠️ 未授权")
                 if !accessibilityTrusted {
@@ -59,12 +69,6 @@ private struct GeneralSettingsView: View {
                         PasteService.shared.openAccessibilitySettings()
                     }
                 }
-            }
-            Section("快捷键") {
-                LabeledContent("打开剪贴板", value: HotKeyCombo.defaultOpenClipboard.displayString)
-                Text("自定义全局快捷键将在后续版本提供。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -84,6 +88,131 @@ private struct GeneralSettingsView: View {
         } message: {
             Text(launchAtLoginErrorMessage ?? "")
         }
+    }
+}
+
+/// 剪贴板设置（§49）：自动清理、历史上限、保存内容开关、单条大小上限。
+/// 全部写入 UserDefaults，监听与调度即时读取生效。
+private struct ClipboardSettingsView: View {
+    @AppStorage(CleanupSettings.retentionKey) private var retentionRaw = RetentionPolicy.thirtyDays.rawValue
+    @AppStorage(CleanupSettings.historyLimitKey) private var historyLimit = 1000
+    @AppStorage(CaptureSettings.maxItemSizeKey) private var maxItemSize = 50 * 1024 * 1024
+    @AppStorage(CaptureSettings.saveImagesKey) private var saveImages = true
+    @AppStorage(CaptureSettings.saveFilesKey) private var saveFiles = true
+    @AppStorage(CaptureSettings.saveURLsKey) private var saveURLs = true
+
+    private let historyLimits: [(Int, String)] = [
+        (100, "100 条"),
+        (500, "500 条"),
+        (1000, "1000 条"),
+        (5000, "5000 条"),
+        (0, "不限"),
+    ]
+
+    private let itemSizes: [(Int, String)] = [
+        (5 * 1024 * 1024, "5 MB"),
+        (10 * 1024 * 1024, "10 MB"),
+        (50 * 1024 * 1024, "50 MB"),
+        (100 * 1024 * 1024, "100 MB"),
+    ]
+
+    var body: some View {
+        Form {
+            Section("自动清理") {
+                Picker("保留时长", selection: $retentionRaw) {
+                    ForEach(RetentionPolicy.allCases) { policy in
+                        Text(policy.title).tag(policy.rawValue)
+                    }
+                }
+                Picker("历史上限", selection: $historyLimit) {
+                    ForEach(historyLimits, id: \.0) { limit, title in
+                        Text(title).tag(limit)
+                    }
+                }
+                Text("超出上限时从最旧的非置顶记录开始清理；置顶记录永不自动清理。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("保存内容") {
+                Toggle("保存图片", isOn: $saveImages)
+                Toggle("保存文件与文件夹", isOn: $saveFiles)
+                Toggle("保存 URL", isOn: $saveURLs)
+                Picker("单条大小上限", selection: $maxItemSize) {
+                    ForEach(itemSizes, id: \.0) { size, title in
+                        Text(title).tag(size)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onChange(of: retentionRaw) {
+            Task { await CleanupScheduler.shared.runOnce() }
+        }
+        .onChange(of: historyLimit) {
+            Task { await CleanupScheduler.shared.runOnce() }
+        }
+    }
+}
+
+/// 隐私设置（§39、§40）：暂停记录、排除应用管理。
+private struct PrivacySettingsView: View {
+    @Environment(AppState.self) private var appState
+    @State private var userExcluded: [String] = ExcludedApps.userDefined.sorted()
+    @State private var newBundleID = ""
+
+    var body: some View {
+        Form {
+            Section("记录") {
+                Toggle(
+                    "暂停记录剪贴板",
+                    isOn: Binding(
+                        get: { appState.isPaused },
+                        set: { appState.setPaused($0) }
+                    )
+                )
+                Text("暂停期间不记录任何新内容，菜单栏图标会同步变化。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("内置排除应用") {
+                ForEach(ExcludedApps.builtIn.sorted(), id: \.self) { bundleID in
+                    LabeledContent(bundleID, value: "内置")
+                }
+                Text("这些应用前台时不会记录剪贴板（如密码管理器）。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("自定义排除应用") {
+                ForEach(userExcluded, id: \.self) { bundleID in
+                    HStack {
+                        Text(bundleID)
+                        Spacer()
+                        Button("移除") {
+                            ExcludedApps.removeUser(bundleID)
+                            refresh()
+                        }
+                    }
+                }
+                HStack {
+                    TextField("com.example.app", text: $newBundleID)
+                        .textFieldStyle(.roundedBorder)
+                    Button("添加") {
+                        ExcludedApps.addUser(newBundleID)
+                        newBundleID = ""
+                        refresh()
+                    }
+                    .disabled(newBundleID.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Text("按 Bundle ID 添加；这些应用前台时剪贴板不会被记录。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func refresh() {
+        userExcluded = ExcludedApps.userDefined.sorted()
     }
 }
 

@@ -43,7 +43,7 @@ enum ClipboardEntryType: Hashable, Sendable, CaseIterable {
 }
 
 /// 历史保留时长（§32）。rawValue 持久化于 UserDefaults。
-enum RetentionPolicy: String, Hashable, Sendable, CaseIterable {
+enum RetentionPolicy: String, Hashable, Sendable, CaseIterable, Identifiable {
     case oneDay
     case sevenDays
     case thirtyDays
@@ -57,6 +57,18 @@ enum RetentionPolicy: String, Hashable, Sendable, CaseIterable {
         case .thirtyDays: .thirtyDays
         case .ninetyDays: .ninetyDays
         case .never: .never
+        }
+    }
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .oneDay: "1 天"
+        case .sevenDays: "7 天"
+        case .thirtyDays: "30 天"
+        case .ninetyDays: "90 天"
+        case .never: "永不"
         }
     }
 }

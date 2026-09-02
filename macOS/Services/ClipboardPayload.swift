@@ -25,8 +25,8 @@ struct ClipboardPayload: Sendable {
     /// 捕获时间（读取到内容的时间）。
     let capturedAt: Date
 
-    /// 单条内容大小上限（§51，默认 50MB；设置项在 Phase 11 接入）。
-    static let maxItemSize: Int64 = 50 * 1024 * 1024
+    /// 单条内容大小上限（§51，默认 50MB，设置页可调）。
+    static var maxItemSize: Int64 { CaptureSettings.maxItemSize }
 
     var byteSize: Int64 {
         switch content {

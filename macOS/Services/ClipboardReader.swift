@@ -11,21 +11,28 @@ enum ClipboardReader {
 
         // 文件 / 文件夹（Phase 8）最先判定：Finder 复制文件时会同时携带
         // file-url、TIFF 图标与路径文本，必须优先命中，避免误存为图片或文本。
-        if types.contains(.fileURL),
+        if types.contains(.fileURL), CaptureSettings.saveFiles,
            let payload = readFileURLs(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName)
         {
             return payload
         }
 
-        // 文本（含 URL 字符串；类型细分由 Rust 分类器完成）
+        // 文本（含 URL 字符串；类型细分由 Rust 分类器完成；URL 保存开关在此过滤）
         if types.contains(.string),
            let payload = readText(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName)
         {
+            if case .text(let text) = payload.content,
+               CaptureSettings.looksLikeURL(text), !CaptureSettings.saveURLs
+            {
+                return nil
+            }
             return payload
         }
 
         // 图片（Phase 7）：PNG / TIFF
-        if let payload = readImage(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName) {
+        if CaptureSettings.saveImages,
+           let payload = readImage(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName)
+        {
             return payload
         }
 

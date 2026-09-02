@@ -25,4 +25,20 @@ enum ExcludedApps {
         guard let bundleID else { return false }
         return all.contains(bundleID)
     }
+
+    // MARK: - 管理（§39，设置页调用）
+
+    static func addUser(_ bundleID: String) {
+        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = userDefined
+        list.insert(trimmed)
+        UserDefaults.standard.set(list.sorted(), forKey: storageKey)
+    }
+
+    static func removeUser(_ bundleID: String) {
+        var list = userDefined
+        list.remove(bundleID)
+        UserDefaults.standard.set(list.sorted(), forKey: storageKey)
+    }
 }
