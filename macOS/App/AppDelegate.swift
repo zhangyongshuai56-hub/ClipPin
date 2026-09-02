@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var clipboardMonitor: ClipboardMonitor?
+    private let globalShortcutManager = GlobalShortcutManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement 兜底：确保应用以菜单栏常驻方式运行，不占用 Dock
@@ -16,10 +17,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.start()
             clipboardMonitor = monitor
 
+            registerGlobalShortcut()
+
             // 调试 / 自动化测试钩子：传入 -AidoPasteShowWindowOnLaunch 时启动即显示主窗口
             if ProcessInfo.processInfo.arguments.contains("-AidoPasteShowWindowOnLaunch") {
                 WindowManager.shared.showClipboardWindow()
             }
+        }
+    }
+
+    /// 注册全局快捷键（§26，默认 ⌘⇧V）。失败可见：记录日志，设置页将展示错误（Phase 11）。
+    private func registerGlobalShortcut() {
+        do {
+            try globalShortcutManager.register(.defaultOpenClipboard) {
+                WindowManager.shared.toggleClipboardWindow()
+            }
+        } catch {
+            // 不中断启动；错误信息已由 manager 记录
         }
     }
 

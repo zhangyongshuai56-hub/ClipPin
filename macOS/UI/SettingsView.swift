@@ -52,7 +52,7 @@ private struct GeneralSettingsView: View {
                 }
             }
             Section("快捷键") {
-                LabeledContent("打开剪贴板", value: "⌘ ⇧ V")
+                LabeledContent("打开剪贴板", value: HotKeyCombo.defaultOpenClipboard.displayString)
                 Text("自定义全局快捷键将在后续版本提供。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

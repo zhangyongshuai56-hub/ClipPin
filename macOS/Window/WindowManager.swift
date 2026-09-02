@@ -13,17 +13,28 @@ final class WindowManager {
     /// 窗口内容使用的 ViewModel；随窗口内容一起释放。
     private weak var viewModel: ClipboardViewModel?
 
-    /// 显示剪贴板窗口（§26）。Core 未就绪时记录错误并忽略，不崩溃。
+    /// 显示剪贴板窗口（§26）：出现在鼠标所在屏幕、靠近鼠标的位置（§27）。
+    /// Core 未就绪时记录错误并忽略，不崩溃。
     func showClipboardWindow(focusSearch: Bool = false) {
         guard let repository = CoreStore.shared.repository else {
             logger.error("clipboard window requested before core is ready")
             return
         }
         let window = clipboardWindow ?? makeClipboardWindow(repository: repository)
+        positionWindowNearMouse(window)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         if focusSearch {
             viewModel?.requestSearchFocus()
+        }
+    }
+
+    /// 全局快捷键行为（§26）：未显示 → 呼出并聚焦搜索；已显示 → 隐藏。
+    func toggleClipboardWindow() {
+        if let window = clipboardWindow, window.isVisible {
+            hideClipboardWindow()
+        } else {
+            showClipboardWindow(focusSearch: true)
         }
     }
 
@@ -45,5 +56,30 @@ final class WindowManager {
         )
         clipboardWindow = window
         return window
+    }
+
+    // MARK: - 定位（§27）
+
+    /// 窗口出现在鼠标附近：以鼠标所在屏幕的可见区域为界（自动避开菜单栏、Dock、刘海区域），
+    /// 水平以鼠标为中心，垂直大致与鼠标对齐；越界时收进可见区域，保证不超出屏幕。
+    private func positionWindowNearMouse(_ window: NSWindow) {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
+        guard let screen else {
+            window.center()
+            return
+        }
+        let visibleFrame = screen.visibleFrame
+        let size = window.frame.size
+        var origin = CGPoint(
+            x: mouseLocation.x - size.width / 2,
+            y: mouseLocation.y - size.height * 0.6
+        )
+        origin.x = max(visibleFrame.minX, min(origin.x, visibleFrame.maxX - size.width))
+        origin.y = max(visibleFrame.minY, min(origin.y, visibleFrame.maxY - size.height))
+        // 屏幕比窗口还小（极端分辨率）时兜底取可见区左下角
+        origin.x = max(origin.x, visibleFrame.minX)
+        origin.y = max(origin.y, visibleFrame.minY)
+        window.setFrameOrigin(origin)
     }
 }

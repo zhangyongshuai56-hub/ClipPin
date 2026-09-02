@@ -79,3 +79,11 @@ Phase 5 已完成（Clipboard UI）：
 - 右键菜单（§66）：复制 / Pin / 取消 Pin / 在 Finder 中显示 / 打开链接 / 删除
 - GUI 实机验证通过：布局渲染、实时刷新、键盘导航、复制防自捕获、去重 touch
 
+Phase 6 已完成（全局快捷键）：
+
+- `GlobalShortcutManager`：Carbon `RegisterEventHotKey`，默认 ⌘⇧V（§26）
+- 快捷键行为：未显示 → 呼出并聚焦搜索；已显示 → 隐藏（toggle）
+- 窗口定位（§27）：鼠标所在屏幕 + 鼠标附近，`visibleFrame` 约束（自动避开菜单栏 / Dock / 刘海），越界收敛
+- 注册失败可见（被占用 / 系统错误均抛错并记录），设置页展示当前组合
+- 实机验证：HID 级 CGEvent 模拟 ⌘⇧V，呼出 / 隐藏 / 再呼出全部通过
+
