@@ -85,6 +85,7 @@ final class ClipboardMonitor {
         // 先更新基线：捕获期间若有新变更，下一拍仍能看到更大的 changeCount
         lastChangeCount = changeCount
         isCapturing = true
+        let captureStartedAt = Date()
 
         let sourceName = frontApp?.localizedName
         let repository = self.repository
@@ -106,8 +107,9 @@ final class ClipboardMonitor {
                         }
                     }
                     if savedCount > 0 {
-                        // §84：日志只记录 id / 大小，不记录内容原文
-                        await self.captureDidSave(id: lastID ?? 0, byteSize: payload.byteSize)
+                        let elapsedMs = Int(Date().timeIntervalSince(captureStartedAt) * 1000)
+                        // §84：日志只记录 id / 大小 / 耗时，不记录内容原文
+                        await self.captureDidSave(id: lastID ?? 0, byteSize: payload.byteSize, elapsedMs: elapsedMs)
                     }
                 } else {
                     // §51：超限内容直接跳过
@@ -120,8 +122,8 @@ final class ClipboardMonitor {
         }
     }
 
-    private func captureDidSave(id: Int64, byteSize: Int64) {
-        logger.info("clipboard captured id=\(id) bytes=\(byteSize)")
+    private func captureDidSave(id: Int64, byteSize: Int64, elapsedMs: Int) {
+        logger.info("clipboard captured id=\(id) bytes=\(byteSize) ms=\(elapsedMs)")
         // 通知 UI 层刷新（ViewModel 会做防抖合并）
         NotificationCenter.default.post(name: .clipboardMonitorDidSaveItem, object: nil)
     }

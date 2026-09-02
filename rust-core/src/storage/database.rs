@@ -112,8 +112,10 @@ impl Database {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let conn = Connection::open_in_memory()?;
         let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let storage_root = std::env::temp_dir()
-            .join(format!("aidopaste-images-{}-{sequence}", std::process::id()));
+        let storage_root = std::env::temp_dir().join(format!(
+            "aidopaste-images-{}-{sequence}",
+            std::process::id()
+        ));
         Self::initialize(conn, ImageStore::open(&storage_root)?)
     }
 

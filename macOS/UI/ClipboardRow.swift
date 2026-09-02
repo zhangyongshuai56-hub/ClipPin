@@ -88,15 +88,38 @@ struct ClipboardRow: View {
     }
 }
 
-/// 本地缩略图加载。缩略图文件很小（≤320px），直接同步读取；
-/// Phase 12 按测量结果再加缓存。
+/// 缩略图内存缓存（§57、§83）：列表滚动时行会反复重绘，
+/// NSCache 避免重复磁盘 IO，并在内存压力下自动逐出。
+@MainActor
+final class ThumbnailCache {
+    static let shared = ThumbnailCache()
+
+    private let cache = NSCache<NSString, NSImage>()
+
+    private init() {
+        cache.countLimit = 200
+        cache.totalCostLimit = 64 * 1024 * 1024
+    }
+
+    func image(for path: String) -> NSImage? {
+        if let cached = cache.object(forKey: path as NSString) {
+            return cached
+        }
+        guard let image = NSImage(contentsOfFile: path) else { return nil }
+        let cost = Int(image.size.width * image.size.height * 4)
+        cache.setObject(image, forKey: path as NSString, cost: cost)
+        return image
+    }
+}
+
+/// 本地缩略图加载（经缓存）。
 struct ThumbnailImage: View {
     let path: String?
     let side: CGFloat
 
     var body: some View {
         Group {
-            if let path, let image = NSImage(contentsOfFile: path) {
+            if let path, let image = ThumbnailCache.shared.image(for: path) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()

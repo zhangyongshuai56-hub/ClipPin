@@ -506,3 +506,45 @@ fn sweep_removes_orphans_and_keeps_referenced_and_recent_tmp() {
         "进行中的临时文件应保留"
     );
 }
+
+// MARK: - 规模性能冒烟（§73：万条级回归防线）
+
+#[test]
+fn performance_smoke_at_10k_rows() {
+    let db = Database::open_in_memory().unwrap();
+
+    let insert_start = std::time::Instant::now();
+    for i in 0..10_000 {
+        db.create_item(text(&format!("perf item {i:05} 正文内容")))
+            .unwrap();
+    }
+    let insert_elapsed = insert_start.elapsed();
+
+    let list_start = std::time::Instant::now();
+    let page = db.get_items(None, 50, 0).unwrap();
+    assert_eq!(page.len(), 50);
+    let list_elapsed = list_start.elapsed();
+
+    let search_start = std::time::Instant::now();
+    let hits = db.search_items("perf item 09999", None, 50, 0).unwrap();
+    assert!(!hits.is_empty());
+    let search_elapsed = search_start.elapsed();
+
+    let touch_start = std::time::Instant::now();
+    let touched = db.create_item(text("perf item 05000 正文内容")).unwrap();
+    let touch_elapsed = touch_start.elapsed();
+    assert_eq!(
+        touched.text_content.as_deref(),
+        Some("perf item 05000 正文内容")
+    );
+
+    println!(
+        "10k insert={insert_elapsed:?} list50={list_elapsed:?} search={search_elapsed:?} touch={touch_elapsed:?}"
+    );
+
+    // 宽松上限：捕获明显回归，而非微基准
+    assert!(insert_elapsed < std::time::Duration::from_secs(60));
+    assert!(list_elapsed < std::time::Duration::from_millis(100));
+    assert!(search_elapsed < std::time::Duration::from_millis(100));
+    assert!(touch_elapsed < std::time::Duration::from_millis(100));
+}
