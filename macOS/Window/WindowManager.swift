@@ -24,8 +24,16 @@ final class WindowManager {
         PasteService.shared.noteWindowAboutToShow()
         let window = clipboardWindow ?? makeClipboardWindow(repository: repository)
         positionWindowNearMouse(window)
+        // §64：呼出淡入（100~250ms 内）
+        window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
+        logger.info("panel ordered front visible=\(window.isVisible) key=\(window.isKeyWindow) alpha=\(window.alphaValue)")
         NSApp.activate(ignoringOtherApps: true)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        }
         if focusSearch {
             viewModel?.requestSearchFocus()
         }
@@ -40,9 +48,20 @@ final class WindowManager {
         }
     }
 
-    /// 隐藏剪贴板窗口（Esc，§28）。窗口保留状态，下次显示更快。
+    /// 隐藏剪贴板窗口（Esc / 失焦 / Quick Paste，§28、§64）。淡出后保留状态。
     func hideClipboardWindow() {
-        clipboardWindow?.orderOut(nil)
+        logger.info("hide requested")
+        guard let window = clipboardWindow, window.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        }, completionHandler: {
+            MainActor.assumeIsolated {
+                window.orderOut(nil)
+                window.alphaValue = 1
+            }
+        })
     }
 
     /// 外观设置变化时同步到已创建窗口的标题栏。
@@ -53,9 +72,7 @@ final class WindowManager {
     private func makeClipboardWindow(repository: ClipboardRepository) -> ClipboardWindow {
         let viewModel = ClipboardViewModel(repository: repository)
         self.viewModel = viewModel
-        let window = ClipboardWindow(
-            contentViewController: NSHostingController(rootView: ClipboardView(viewModel: viewModel))
-        )
+        let window = ClipboardWindow(rootView: ClipboardView(viewModel: viewModel))
         clipboardWindow = window
         return window
     }

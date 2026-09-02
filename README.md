@@ -133,3 +133,13 @@ Phase 12 已完成（性能）：
 - §73 万条规模冒烟：insert 1.1s / list50 14.8ms / FTS 搜索 2.7ms / touch 121µs（debug 构建）
 - 实测空闲 CPU 0.0%、内存 18MB（§43 达标）
 
+Phase 13 已完成（UI 打磨）：
+
+- Spotlight 式悬浮面板：NSPanel 悬浮层级、全空间可见（§27）、圆角毛玻璃（§23）
+- 呼出淡入 / 隐藏淡出动画（§64，0.15~0.18s）；行 hover 高亮
+- App 图标（渐变 + 剪贴板图形，16~1024 全尺寸）
+- 隐藏路径统一为 Esc / 快捷键 toggle / Quick Paste（稳定性优先）
+
+全部 13 个 Phase 完成。技术栈：SwiftUI + AppKit + Rust Core + SQLite(FTS5) + UniFFI；
+53 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
+

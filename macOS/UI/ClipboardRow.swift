@@ -5,6 +5,7 @@ import SwiftUI
 struct ClipboardRow: View {
     let entry: ClipboardEntry
     let isSelected: Bool
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -40,8 +41,13 @@ struct ClipboardRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+                .fill(
+                    isSelected
+                        ? Color.accentColor.opacity(0.16)
+                        : (isHovered ? Color.secondary.opacity(0.07) : Color.clear)
+                )
         )
+        .onHover { isHovered = $0 }
     }
 
     // MARK: - 行首视觉（§34、§59）
