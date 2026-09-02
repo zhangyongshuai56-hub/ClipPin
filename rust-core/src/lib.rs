@@ -15,7 +15,7 @@ pub mod search;
 pub mod storage;
 
 pub use cleanup::cleanup_manager::{CleanupManager, Retention};
-pub use clipboard::model::{ClipboardItem, ItemType, NewClipboardItem, Statistics};
+pub use clipboard::model::{Board, ClipboardItem, ItemType, NewClipboardItem, Statistics};
 pub use error::{AidoPasteError, Result};
 pub use storage::database::Database;
 

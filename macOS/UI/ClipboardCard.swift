@@ -8,25 +8,28 @@ struct ClipboardCard: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Image(systemName: entry.itemType.symbolName)
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                Text(headText)
+                Text(entry.itemType.title)
+                    .font(.system(size: 11, weight: .medium))
+                Text(entry.updatedAt.shelfRelativeTime)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
             bodyContent
-                .frame(maxWidth: .infinity, minHeight: 52, alignment: .topLeading)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
             HStack(spacing: 4) {
-                Text(entry.updatedAt.clipboardTimestamp)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
-                if entry.isPinned {
+                if let source = entry.sourceAppName {
+                    Text(source)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else if entry.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.system(size: 9))
                         .foregroundStyle(.orange)
@@ -174,12 +177,8 @@ struct ThumbnailImage: View {
 }
 
 extension Date {
-    /// 列表时间显示：今天只显示时间，其它日期带日期。
-    var clipboardTimestamp: String {
-        if Calendar.current.isDateInToday(self) {
-            formatted(date: .omitted, time: .shortened)
-        } else {
-            formatted(date: .abbreviated, time: .shortened)
-        }
+    /// Paste 风格相对时间（如「3分钟前」「昨天 14:30」回退为日期）。
+    var shelfRelativeTime: String {
+        formatted(.relative(presentation: .named))
     }
 }

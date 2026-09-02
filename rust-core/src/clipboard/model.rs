@@ -174,6 +174,15 @@ impl NewClipboardItem {
     }
 }
 
+/// Pinboard 文件夹（需求：创建文件夹收藏剪贴板条目）。
+#[derive(Debug, Clone)]
+pub struct Board {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub position: i64,
+}
+
 /// 统计信息（§54 get_statistics）。
 #[derive(Debug, Clone, Default)]
 pub struct Statistics {

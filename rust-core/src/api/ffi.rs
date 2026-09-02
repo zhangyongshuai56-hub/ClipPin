@@ -163,6 +163,15 @@ fn to_core_new_item(item: NewClipboardItem) -> CoreNewItem {
     }
 }
 
+/// Pinboard 文件夹。
+#[derive(Debug, Clone, Record)]
+pub struct Board {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub position: i64,
+}
+
 /// 类型计数（统计用；避免向 Swift 暴露 HashMap，§81）。
 #[derive(Debug, Clone, Record)]
 pub struct TypeCount {
@@ -294,13 +303,14 @@ impl AidoPasteDatabase {
     pub fn get_items(
         &self,
         filter: Option<ItemType>,
+        board_id: Option<i64>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ClipboardItem>, AidoPasteError> {
         let (limit, offset) = page_range(limit, offset)?;
         Ok(self
             .db
-            .get_items(filter.map(CoreItemType::from), limit, offset)?
+            .get_items(filter.map(CoreItemType::from), board_id, limit, offset)?
             .into_iter()
             .map(Into::into)
             .collect())
@@ -326,16 +336,59 @@ impl AidoPasteDatabase {
         &self,
         query: String,
         filter: Option<ItemType>,
+        board_id: Option<i64>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ClipboardItem>, AidoPasteError> {
         let (limit, offset) = page_range(limit, offset)?;
         Ok(self
             .db
-            .search_items(&query, filter.map(CoreItemType::from), limit, offset)?
+            .search_items(
+                &query,
+                filter.map(CoreItemType::from),
+                board_id,
+                limit,
+                offset,
+            )?
             .into_iter()
             .map(Into::into)
             .collect())
+    }
+
+    /// 创建 Pinboard 文件夹。
+    pub fn create_board(&self, name: String, color: String) -> Result<Board, AidoPasteError> {
+        let board = self.db.create_board(&name, &color)?;
+        Ok(Board {
+            id: board.id,
+            name: board.name,
+            color: board.color,
+            position: board.position,
+        })
+    }
+
+    /// 删除文件夹（其中条目回到默认「剪贴板」）。
+    pub fn delete_board(&self, id: i64) -> Result<(), AidoPasteError> {
+        Ok(self.db.delete_board(id)?)
+    }
+
+    /// 全部文件夹。
+    pub fn list_boards(&self) -> Result<Vec<Board>, AidoPasteError> {
+        Ok(self
+            .db
+            .list_boards()?
+            .into_iter()
+            .map(|board| Board {
+                id: board.id,
+                name: board.name,
+                color: board.color,
+                position: board.position,
+            })
+            .collect())
+    }
+
+    /// 把条目移入 / 移出文件夹（None = 移回默认「剪贴板」）。
+    pub fn set_item_board(&self, id: i64, board_id: Option<i64>) -> Result<(), AidoPasteError> {
+        Ok(self.db.set_item_board(id, board_id)?)
     }
 
     /// 删除单条。
@@ -392,7 +445,7 @@ mod tests {
     #[test]
     fn ffi_surface_roundtrip_search_pin_statistics() {
         let db = AidoPasteDatabase::open_in_memory().unwrap();
-        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.schema_version().unwrap(), 2);
 
         let created = db
             .create_item(NewClipboardItem {
@@ -405,7 +458,9 @@ mod tests {
         assert_eq!(created.item_type, ItemType::Text);
         assert_eq!(created.source_app.as_deref(), Some("com.apple.Safari"));
 
-        let found = db.search_items("边界测试".into(), None, 50, 0).unwrap();
+        let found = db
+            .search_items("边界测试".into(), None, None, 50, 0)
+            .unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, created.id);
 
@@ -435,7 +490,7 @@ mod tests {
     #[test]
     fn ffi_page_range_rejects_negative() {
         let db = AidoPasteDatabase::open_in_memory().unwrap();
-        let error = db.get_items(None, -1, 0).unwrap_err();
+        let error = db.get_items(None, None, -1, 0).unwrap_err();
         assert!(matches!(error, AidoPasteError::InvalidInput { .. }));
     }
 }

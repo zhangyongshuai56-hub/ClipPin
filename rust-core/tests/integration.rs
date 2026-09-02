@@ -35,7 +35,7 @@ fn duplicate_content_dedups_and_touches() {
 
     // 同内容不产生新记录，id 不变
     assert_eq!(first.id, again.id);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 1);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 1);
     // Pin 状态保留，来源更新为最近一次
     let item = db.get_item(first.id).unwrap();
     assert!(item.is_pinned);
@@ -77,14 +77,24 @@ fn pagination_and_type_filter() {
         db.create_item(url).unwrap();
     }
 
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 8);
-    assert_eq!(db.get_items(None, 3, 0).unwrap().len(), 3);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 8);
+    assert_eq!(db.get_items(None, None, 3, 0).unwrap().len(), 3);
     // 第二页
-    let page2 = db.get_items(None, 3, 3).unwrap();
+    let page2 = db.get_items(None, None, 3, 3).unwrap();
     assert_eq!(page2.len(), 3);
     // 类型过滤
-    assert_eq!(db.get_items(Some(ItemType::Url), 100, 0).unwrap().len(), 3);
-    assert_eq!(db.get_items(Some(ItemType::Text), 100, 0).unwrap().len(), 5);
+    assert_eq!(
+        db.get_items(Some(ItemType::Url), None, 100, 0)
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        db.get_items(Some(ItemType::Text), None, 100, 0)
+            .unwrap()
+            .len(),
+        5
+    );
 }
 
 #[test]
@@ -96,24 +106,40 @@ fn search_finds_english_cjk_and_quoted_content() {
     db.create_item(text("完全无关的内容")).unwrap();
 
     // 英文（大小写不敏感）
-    assert_eq!(db.search_items("apple", None, 50, 0).unwrap().len(), 1);
+    assert_eq!(
+        db.search_items("apple", None, None, 50, 0).unwrap().len(),
+        1
+    );
     // 中文 ≥3 字走 trigram
-    assert_eq!(db.search_items("天气不错", None, 50, 0).unwrap().len(), 1);
+    assert_eq!(
+        db.search_items("天气不错", None, None, 50, 0)
+            .unwrap()
+            .len(),
+        1
+    );
     // 中文 2 字走 LIKE 回退
-    assert_eq!(db.search_items("天气", None, 50, 0).unwrap().len(), 1);
+    assert_eq!(db.search_items("天气", None, None, 50, 0).unwrap().len(), 1);
     // 含引号的内容可安全检索
-    assert_eq!(db.search_items(r#""引号""#, None, 50, 0).unwrap().len(), 1);
+    assert_eq!(
+        db.search_items(r#""引号""#, None, None, 50, 0)
+            .unwrap()
+            .len(),
+        1
+    );
     // FTS 操作符注入不会生效
     assert_eq!(
-        db.search_items("apple OR notfound", None, 50, 0)
+        db.search_items("apple OR notfound", None, None, 50, 0)
             .unwrap()
             .len(),
         0
     );
     // 无命中
-    assert_eq!(db.search_items("zzzzz", None, 50, 0).unwrap().len(), 0);
+    assert_eq!(
+        db.search_items("zzzzz", None, None, 50, 0).unwrap().len(),
+        0
+    );
     // 空查询 = 列出全部
-    assert_eq!(db.search_items("  ", None, 50, 0).unwrap().len(), 4);
+    assert_eq!(db.search_items("  ", None, None, 50, 0).unwrap().len(), 4);
 }
 
 #[test]
@@ -130,18 +156,26 @@ fn search_supports_source_app_and_respects_type_filter() {
     .unwrap();
 
     // 命中来源应用名
-    assert_eq!(db.search_items("Notes", None, 50, 0).unwrap().len(), 1);
-    // 同关键词命中两种类型，再按类型过滤
-    assert_eq!(db.search_items("zebra", None, 50, 0).unwrap().len(), 2);
     assert_eq!(
-        db.search_items("zebra", Some(ItemType::Url), 50, 0)
+        db.search_items("Notes", None, None, 50, 0).unwrap().len(),
+        1
+    );
+    // 同关键词命中两种类型，再按类型过滤
+    assert_eq!(
+        db.search_items("zebra", None, None, 50, 0).unwrap().len(),
+        2
+    );
+    assert_eq!(
+        db.search_items("zebra", Some(ItemType::Url), None, 50, 0)
             .unwrap()
             .len(),
         1
     );
     // URL / 文件路径关键词
     assert_eq!(
-        db.search_items("zebra.example", None, 50, 0).unwrap().len(),
+        db.search_items("zebra.example", None, None, 50, 0)
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -151,12 +185,16 @@ fn delete_removes_from_search_index() {
     let db = Database::open_in_memory().unwrap();
     let item = db.create_item(text("unique-needle 特征词内容")).unwrap();
     assert_eq!(
-        db.search_items("unique-needle", None, 50, 0).unwrap().len(),
+        db.search_items("unique-needle", None, None, 50, 0)
+            .unwrap()
+            .len(),
         1
     );
     db.delete_item(item.id).unwrap();
     assert_eq!(
-        db.search_items("unique-needle", None, 50, 0).unwrap().len(),
+        db.search_items("unique-needle", None, None, 50, 0)
+            .unwrap()
+            .len(),
         0
     );
 }
@@ -169,7 +207,7 @@ fn batch_delete_returns_deleted_count() {
         .collect();
     let deleted = db.delete_items(&ids[0..3]).unwrap();
     assert_eq!(deleted, 3);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 2);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 2);
     // 重复删除同一批：0
     assert_eq!(db.delete_items(&ids[0..3]).unwrap(), 0);
 }
@@ -222,12 +260,12 @@ fn history_limit_keeps_recent_and_pinned() {
     for i in 0..9 {
         db.create_item(text(&format!("history item {i}"))).unwrap();
     }
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 10);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 10);
 
     let trimmed = db.enforce_history_limit(5).unwrap();
     // 4 条最旧的非 Pin 被删（第 5 名是 pinned，不参与）
     assert_eq!(trimmed, 4);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 6);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 6);
     // Pin 永远保留
     assert!(db.get_item(first.id).is_ok());
 }
@@ -269,7 +307,7 @@ fn data_persists_across_reopen() {
 
     let created_id = {
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.schema_version().unwrap(), 2);
         let item = db
             .create_item(source("跨重启保留的内容", "com.apple.Safari"))
             .unwrap();
@@ -278,8 +316,8 @@ fn data_persists_across_reopen() {
 
     // 重新打开：数据完好，版本不重复迁移
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 1);
-    let items = db.get_items(None, 100, 0).unwrap();
+    assert_eq!(db.schema_version().unwrap(), 2);
+    let items = db.get_items(None, None, 100, 0).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, created_id);
     assert_eq!(items[0].text_content.as_deref(), Some("跨重启保留的内容"));
@@ -323,7 +361,7 @@ fn concurrent_writers_are_serialized_safely() {
         handle.join().unwrap();
     }
     // 80 条内容各不相同
-    assert_eq!(db.get_items(None, 1000, 0).unwrap().len(), 80);
+    assert_eq!(db.get_items(None, None, 1000, 0).unwrap().len(), 80);
 }
 
 // MARK: - 图片（Phase 7）
@@ -369,7 +407,7 @@ fn image_items_are_stored_with_thumbnail_and_dedup() {
     // 相同图片再次复制：去重 touch，不新增文件
     let again = db.create_item(image_item(&path)).unwrap();
     assert_eq!(first.id, again.id);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 1);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 1);
 
     // 删除条目：图片与缩略图一并清理（§32）
     db.delete_item(first.id).unwrap();
@@ -441,13 +479,13 @@ fn file_items_capture_metadata_without_copying_content() {
     // 同一文件再次复制 → 去重 touch
     let again = db.create_item(file_item(&path)).unwrap();
     assert_eq!(item.id, again.id);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 1);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 1);
 
     // 文件内容变更（大小变化）后再复制 → 新条目
     std::fs::write(&path, b"changed content with different size").unwrap();
     let changed = db.create_item(file_item(&path)).unwrap();
     assert_ne!(item.id, changed.id);
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 2);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 2);
 }
 
 #[test]
@@ -475,7 +513,7 @@ fn missing_files_fail_without_creating_rows() {
         result,
         Err(aidopaste_core::AidoPasteError::FileSystem(_))
     ));
-    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 0);
+    assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 0);
 }
 
 // MARK: - 孤儿文件清扫（Phase 9，§48）
@@ -521,12 +559,14 @@ fn performance_smoke_at_10k_rows() {
     let insert_elapsed = insert_start.elapsed();
 
     let list_start = std::time::Instant::now();
-    let page = db.get_items(None, 50, 0).unwrap();
+    let page = db.get_items(None, None, 50, 0).unwrap();
     assert_eq!(page.len(), 50);
     let list_elapsed = list_start.elapsed();
 
     let search_start = std::time::Instant::now();
-    let hits = db.search_items("perf item 09999", None, 50, 0).unwrap();
+    let hits = db
+        .search_items("perf item 09999", None, None, 50, 0)
+        .unwrap();
     assert!(!hits.is_empty());
     let search_elapsed = search_start.elapsed();
 
@@ -547,4 +587,65 @@ fn performance_smoke_at_10k_rows() {
     assert!(list_elapsed < std::time::Duration::from_millis(100));
     assert!(search_elapsed < std::time::Duration::from_millis(100));
     assert!(touch_elapsed < std::time::Duration::from_millis(100));
+}
+
+// MARK: - Pinboard 文件夹（需求：创建文件夹收藏剪贴板条目）
+
+#[test]
+fn boards_crud_and_item_membership() {
+    let db = Database::open_in_memory().unwrap();
+    let a = db.create_item(text("board item a")).unwrap();
+    let b = db.create_item(text("board item b")).unwrap();
+
+    let board = db.create_board("工作资料", "#4F8EF7").unwrap();
+    assert_eq!(board.name, "工作资料");
+
+    // 移入文件夹
+    db.set_item_board(a.id, Some(board.id)).unwrap();
+    let in_board = db.get_items(None, Some(board.id), 100, 0).unwrap();
+    assert_eq!(in_board.len(), 1);
+    assert_eq!(in_board[0].id, a.id);
+
+    // 默认「剪贴板」= 全部历史（board 过滤为 None 时不含过滤）
+    let all = db.get_items(None, None, 100, 0).unwrap();
+    assert_eq!(all.len(), 2);
+
+    // 删除文件夹：条目自动回到默认收藏夹
+    db.delete_board(board.id).unwrap();
+    let released = db.get_items(None, Some(999), 100, 0).unwrap();
+    assert_eq!(released.len(), 0);
+    let _ = db.get_item(b.id).unwrap();
+    assert!(db.get_item(a.id).is_ok());
+    assert!(matches!(
+        db.delete_board(board.id),
+        Err(aidopaste_core::AidoPasteError::NotFound(_))
+    ));
+}
+
+#[test]
+fn board_items_are_exempt_from_cleanup_and_limit() {
+    let db = Database::open_in_memory().unwrap();
+    let item = db.create_item(text("pinned to board")).unwrap();
+    let board = db.create_board("珍藏", "#FF8800").unwrap();
+    db.set_item_board(item.id, Some(board.id)).unwrap();
+
+    let future = aidopaste_core::clipboard::model::now_ms() + 2 * 86_400_000;
+    assert_eq!(db.cleanup_expired(Retention::OneDay, future).unwrap(), 0);
+    assert_eq!(db.enforce_history_limit(0).unwrap(), 0);
+    assert!(db.get_item(item.id).is_ok());
+}
+
+#[test]
+fn search_respects_board_filter() {
+    let db = Database::open_in_memory().unwrap();
+    let in_board = db.create_item(text("github search target")).unwrap();
+    let _outside = db.create_item(text("github outside target")).unwrap();
+    let board = db.create_board("dev", "#00AA00").unwrap();
+    db.set_item_board(in_board.id, Some(board.id)).unwrap();
+
+    let hits = db
+        .search_items("github", None, Some(board.id), 50, 0)
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].id, in_board.id);
 }

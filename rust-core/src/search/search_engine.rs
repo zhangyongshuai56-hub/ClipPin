@@ -16,17 +16,18 @@ pub(crate) fn search(
     conn: &Connection,
     raw_query: &str,
     filter: Option<ItemType>,
+    board_id: Option<i64>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>> {
     let query = raw_query.trim();
     if query.is_empty() {
-        return list_items(conn, filter, limit, offset);
+        return list_items(conn, filter, board_id, limit, offset);
     }
     if query.chars().count() >= 3 {
-        search_fts(conn, query, filter, limit, offset)
+        search_fts(conn, query, filter, board_id, limit, offset)
     } else {
-        search_like(conn, query, filter, limit, offset)
+        search_like(conn, query, filter, board_id, limit, offset)
     }
 }
 
@@ -35,6 +36,7 @@ fn search_fts(
     conn: &Connection,
     query: &str,
     filter: Option<ItemType>,
+    board_id: Option<i64>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>> {
@@ -48,6 +50,10 @@ fn search_fts(
     if let Some(item_type) = filter {
         sql.push_str(" AND clipboard_items.type = ?2");
         values.push(Value::Text(item_type.as_str().into()));
+    }
+    if let Some(board) = board_id {
+        sql.push_str(format!(" AND clipboard_items.board_id = ?{}", values.len() + 1).as_str());
+        values.push(Value::Integer(board));
     }
     let limit_index = values.len() + 1;
     let offset_index = values.len() + 2;
@@ -70,6 +76,7 @@ fn search_like(
     conn: &Connection,
     query: &str,
     filter: Option<ItemType>,
+    board_id: Option<i64>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>> {
@@ -91,6 +98,10 @@ fn search_like(
     if let Some(item_type) = filter {
         sql.push_str(" AND type = ?2");
         values.push(Value::Text(item_type.as_str().into()));
+    }
+    if let Some(board) = board_id {
+        sql.push_str(format!(" AND board_id = ?{}", values.len() + 1).as_str());
+        values.push(Value::Integer(board));
     }
     let limit_index = values.len() + 1;
     let offset_index = values.len() + 2;

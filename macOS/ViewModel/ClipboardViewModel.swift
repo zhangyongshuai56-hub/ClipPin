@@ -3,51 +3,6 @@ import Combine
 import Foundation
 import Observation
 
-/// 侧栏 / 面板分类（需求 §2）。分类过滤为精确单类型；folder 等类型暂归"全部"显示。
-enum ClipboardCategory: String, CaseIterable, Identifiable {
-    case all
-    case pinned
-    case text
-    case images
-    case links
-    case files
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all: "全部"
-        case .pinned: "收藏"
-        case .text: "文本"
-        case .images: "图片"
-        case .links: "链接"
-        case .files: "文件"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .all: "tray.full"
-        case .pinned: "pin"
-        case .text: "doc.on.doc"
-        case .images: "photo"
-        case .links: "globe"
-        case .files: "folder"
-        }
-    }
-
-    /// 传给 Core 的类型过滤；nil 表示不过滤。
-    var itemTypeFilter: ClipboardEntryType? {
-        switch self {
-        case .all, .pinned: nil
-        case .text: .text
-        case .images: .image
-        case .links: .url
-        case .files: .file
-        }
-    }
-}
-
 /// 操作反馈状态（需求 §18）：执行后必须有明确反馈，不静默。
 enum OperationFeedback: Equatable {
     case idle
@@ -58,12 +13,12 @@ enum OperationFeedback: Equatable {
     case failed(String)
 }
 
-/// 二维网格导航方向（需求 §8：↑↓←→）。
-enum GridDirection {
-    case up, down, left, right
+/// 键盘左右导航方向（单行卡片流）。
+enum ShelfDirection {
+    case left, right
 }
 
-/// 剪贴板面板状态（§56）：列表 / 搜索 / 网格选择 / 动作 / 反馈。
+/// 剪贴板底部面板状态（§56）。
 @MainActor
 @Observable
 final class ClipboardViewModel {
@@ -78,22 +33,29 @@ final class ClipboardViewModel {
     var showAccessibilityPrompt = false
     private(set) var feedback: OperationFeedback = .idle
     private var feedbackResetTask: Task<Void, Never>?
-    /// 分类计数（tabs 角标）。
-    private(set) var categoryCounts: [ClipboardCategory: Int] = [:]
 
     /// 当前选中的条目。
     var selectedEntry: ClipboardEntry? {
         entries.first { $0.id == selectionID }
     }
 
-    // MARK: - 分类与搜索（§29）
+    // MARK: - Pinboard 文件夹（需求：创建文件夹收藏剪贴板条目）
 
-    var category: ClipboardCategory = .all {
+    /// 用户创建的文件夹；虚拟「剪贴板」不在其中（selectedBoardID == nil）。
+    private(set) var boards: [Pinboard] = []
+    /// 当前查看的文件夹；nil = 默认「剪贴板」（全部历史）。
+    var selectedBoardID: Int64? {
         didSet {
-            guard oldValue != category else { return }
+            guard oldValue != selectedBoardID else { return }
             Task { await load(reset: true) }
         }
     }
+
+    // MARK: - 粘贴默认操作（需求：设置界面可选）
+
+    var defaultAction: DefaultPasteAction = PasteSettings.defaultAction
+
+    // MARK: - 搜索
 
     var searchText: String = "" {
         didSet {
@@ -104,11 +66,9 @@ final class ClipboardViewModel {
 
     private var searchTask: Task<Void, Never>?
     private var monitorCancellable: AnyCancellable?
-    /// 搜索框聚焦请求计数；SearchBar 观察该值变化后聚焦。
+    private var defaultsObserver: NSObjectProtocol?
+    /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
-
-    /// 网格列数（视图随窗口宽度计算后写入），供 ↑↓←→ 二维导航使用。
-    var gridColumns: Int = 4
 
     /// 分页（§58）。
     private let pageSize = 50
@@ -124,16 +84,27 @@ final class ClipboardViewModel {
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }
+        // 设置变更即时反映（默认操作 / 纯文本开关）
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // 注意：这里只读偏好；若再写回 UserDefaults 会触发无限递归
+                guard let self, self.defaultAction != PasteSettings.defaultAction else { return }
+                self.defaultAction = PasteSettings.defaultAction
+            }
+        }
     }
 
     // MARK: - 加载
 
-    /// 首次显示面板时加载。
     func loadInitial() async {
+        await refreshBoards()
         await load(reset: true)
     }
 
-    /// 滚动到底部时加载下一页（§58）。
     func loadNextPageIfNeeded() async {
         guard canLoadMore, !isLoading else { return }
         await load(reset: false)
@@ -150,15 +121,13 @@ final class ClipboardViewModel {
             if isSearchActive {
                 page = try await repository.search(
                     searchText,
-                    type: category.itemTypeFilter,
+                    boardId: selectedBoardID,
                     limit: pageSize,
                     offset: offset
                 )
-            } else if category == .pinned {
-                page = try await repository.pinnedItems(limit: pageSize, offset: offset)
             } else {
                 page = try await repository.items(
-                    type: category.itemTypeFilter,
+                    boardId: selectedBoardID,
                     limit: pageSize,
                     offset: offset
                 )
@@ -170,7 +139,6 @@ final class ClipboardViewModel {
             }
             canLoadMore = page.count == pageSize
             fixSelection()
-            await updateCounts()
         } catch {
             setError(error)
         }
@@ -179,24 +147,6 @@ final class ClipboardViewModel {
     /// 监听器新入库 / 复制 touch 后的刷新。
     func refresh() async {
         await load(reset: true)
-    }
-
-    private func updateCounts() async {
-        guard let stats = try? await repository.statistics() else { return }
-        var counts: [ClipboardCategory: Int] = [
-            .all: Int(stats.totalCount),
-            .pinned: Int(stats.pinnedCount),
-        ]
-        for (type, count) in stats.byType {
-            switch type {
-            case .text: counts[.text, default: 0] += Int(count)
-            case .url: counts[.links, default: 0] += Int(count)
-            case .image: counts[.images, default: 0] += Int(count)
-            case .file, .folder: counts[.files, default: 0] += Int(count)
-            default: break
-            }
-        }
-        categoryCounts = counts
     }
 
     private func scheduleSearch() {
@@ -212,7 +162,6 @@ final class ClipboardViewModel {
         }
     }
 
-    /// 当前是否处于搜索状态。
     var isSearchActive: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
     }
@@ -222,55 +171,83 @@ final class ClipboardViewModel {
         selectionID = entries.first?.id
     }
 
-    // MARK: - 二维网格导航（需求 §8：↑↓←→）
+    // MARK: - 左右导航
 
-    func moveInGrid(_ direction: GridDirection) {
+    func moveInShelf(_ direction: ShelfDirection) {
         guard !entries.isEmpty else { return }
-        let columns = max(gridColumns, 1)
         guard let index = entries.firstIndex(where: { $0.id == selectionID }) else {
             selectionID = entries.first?.id
             return
         }
-        let row = index / columns
-        let column = index % columns
-        var targetRow = row
-        var targetColumn = column
-        switch direction {
-        case .up: targetRow = row - 1
-        case .down: targetRow = row + 1
-        case .left: targetColumn = column - 1
-        case .right: targetColumn = column + 1
-        }
-        // 左右在行边界处保持原位（不做环形回绕）
-        guard targetColumn >= 0, targetColumn < columns else { return }
-        let targetIndex = targetRow * columns + targetColumn
-        guard targetIndex >= 0, targetIndex < entries.count else { return }
-        selectionID = entries[targetIndex].id
+        let next = index + (direction == .right ? 1 : -1)
+        guard entries.indices.contains(next) else { return }
+        selectionID = entries[next].id
     }
 
     func requestSearchFocus() {
         searchFocusRequest += 1
     }
 
-    // MARK: - 动作（§28、§31、§37、§66；需求 §9/§10/§16 两操作严格分离）
+    // MARK: - Pinboard
 
-    /// 操作 B：复制到系统剪贴板（⌘C，需求 §10）。不需要 Accessibility，不执行 ⌘V。
-    func copyToClipboard(_ entry: ClipboardEntry) {
-        guard writeToPasteboard(entry) else { return }
-        showFeedback(.copied, autoClearAfter: .seconds(1.5))
+    func refreshBoards() async {
+        boards = (try? await repository.boards()) ?? []
     }
 
-    /// 操作 A：粘贴到当前活动应用（Enter / ⌘Enter / 双击，需求 §9、§12、§17）。
-    /// 流程（§37）：快照原剪贴板 → 复制 → 隐藏面板 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
-    /// 缺少辅助功能权限时弹出引导，不静默失败（需求 §15）。
+    func createBoard(named name: String) async {
+        do {
+            let board = try await repository.createBoard(name: name, color: "#4F8EF7")
+            await refreshBoards()
+            selectedBoardID = board.id
+        } catch {
+            setError(error)
+        }
+    }
+
+    func deleteBoard(_ board: Pinboard) async {
+        do {
+            try await repository.deleteBoard(id: board.id)
+            if selectedBoardID == board.id {
+                selectedBoardID = nil
+            }
+            await refreshBoards()
+            await load(reset: true)
+        } catch {
+            setError(error)
+        }
+    }
+
+    /// 把条目移入文件夹；boardID 为 nil 表示移回默认「剪贴板」。
+    func move(_ entry: ClipboardEntry, toBoard boardID: Int64?) async {
+        do {
+            try await repository.setItemBoard(id: entry.id, boardId: boardID)
+            await load(reset: true)
+        } catch {
+            setError(error)
+        }
+    }
+
+    // MARK: - 动作（需求 §9/§10/§16 两操作严格分离；§17 默认操作可配置）
+
+    /// Enter / 双击执行的默认操作。
+    func performDefaultAction(_ entry: ClipboardEntry) async {
+        switch PasteSettings.defaultAction {
+        case .activeApp:
+            await pasteToActiveApplication(entry)
+        case .clipboard:
+            copyToClipboard(entry)
+        }
+    }
+
+    /// 操作 A：粘贴到当前活动应用（需求 §9、§12）。
+    /// 快照原剪贴板 → 复制 → 隐藏面板 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
     func pasteToActiveApplication(_ entry: ClipboardEntry) async {
         guard PasteService.shared.isAccessibilityTrusted else {
             showAccessibilityPrompt = true
             return
         }
-        // 先快照用户原剪贴板，粘贴完成后恢复（需求 §14）
         let snapshot = PasteService.shared.captureCurrentContents()
-        guard writeToPasteboard(entry) else { return }
+        guard writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) else { return }
 
         showFeedback(.pasting, autoClearAfter: nil)
         PasteService.shared.isBusy = true
@@ -282,32 +259,34 @@ final class ClipboardViewModel {
             showFeedback(.failed("无法粘贴到当前应用"), autoClearAfter: .seconds(3))
             return
         }
-        // 给目标应用完成粘贴的时间，再恢复用户原剪贴板（需求 §14：确保读取完成后再恢复）
+        // 确保目标 App 读取完成后再恢复原剪贴板（需求 §14）
         try? await Task.sleep(for: .milliseconds(600))
         PasteService.shared.restore(snapshot)
         PasteService.shared.isBusy = false
-        // 需求 §18：✓ 已粘贴到 <目标应用>
         showFeedback(.pasted(PasteService.shared.previousAppName ?? "当前应用"), autoClearAfter: .seconds(1))
-        // 粘贴成功后面板自动消失（需求 §24）
         try? await Task.sleep(for: .milliseconds(900))
         WindowManager.shared.hideClipboardWindow()
     }
 
-    @discardableResult
-    private func writeToPasteboard(_ entry: ClipboardEntry) -> Bool {
+    /// 操作 B：复制到系统剪贴板（需求 §10）。不需要 Accessibility，不执行 ⌘V。
+    func copyToClipboard(_ entry: ClipboardEntry) {
+        guard writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) else { return }
+        showFeedback(.copied, autoClearAfter: .seconds(1.5))
+    }
+
+    private func writeToPasteboard(_ entry: ClipboardEntry, forcePlainText: Bool) -> Bool {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let success: Bool
         switch entry.itemType {
-        case .text, .code, .richText, .other:
-            if let text = entry.textContent {
-                success = pasteboard.setString(text, forType: .string)
-            } else {
-                success = false
-            }
-        case .url:
-            if let url = entry.url {
-                success = pasteboard.setString(url, forType: .string)
+        case .text, .code, .richText, .url, .other:
+            // 纯文本开关：URL / 富文本也只写纯文本
+            if let text = entry.textContent ?? entry.url {
+                if forcePlainText || entry.itemType != .url {
+                    success = pasteboard.setString(text, forType: .string)
+                } else {
+                    success = pasteboard.setString(text, forType: .string)
+                }
             } else {
                 success = false
             }
@@ -320,8 +299,9 @@ final class ClipboardViewModel {
                 success = false
             }
         case .image:
-            // 写回图片（TIFF 形式），可粘贴到任何接受图片的应用
-            if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
+            if forcePlainText {
+                success = false
+            } else if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
                 success = pasteboard.writeObjects([image])
             } else {
                 success = false
@@ -358,7 +338,6 @@ final class ClipboardViewModel {
             try await repository.delete(id: entry.id)
             entries.removeAll { $0.id == entry.id }
             fixSelection()
-            await updateCounts()
         } catch {
             setError(error)
         }
@@ -388,6 +367,7 @@ final class ClipboardViewModel {
             self.feedback = .idle
         }
     }
+
 
     private func setError(_ error: Error) {
         if let coreError = error as? AidoPasteError {

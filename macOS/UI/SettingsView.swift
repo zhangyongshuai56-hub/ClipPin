@@ -116,8 +116,25 @@ private struct ClipboardSettingsView: View {
         (100 * 1024 * 1024, "100 MB"),
     ]
 
+    @AppStorage(PasteSettings.defaultActionKey) private var defaultActionRaw = DefaultPasteAction.activeApp.rawValue
+    @AppStorage(PasteSettings.plainTextKey) private var alwaysPlainText = false
+
     var body: some View {
         Form {
+            Section("粘贴项目") {
+                Picker("默认操作", selection: $defaultActionRaw) {
+                    Text(DefaultPasteAction.activeApp.title).tag(DefaultPasteAction.activeApp.rawValue)
+                    Text(DefaultPasteAction.clipboard.title).tag(DefaultPasteAction.clipboard.rawValue)
+                }
+                .pickerStyle(.radioGroup)
+                .onChange(of: defaultActionRaw) {
+                    Task { await CleanupScheduler.shared.runOnce() }
+                }
+                Text(DefaultPasteAction(rawValue: defaultActionRaw)?.detail ?? "")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Toggle("始终以纯文本粘贴", isOn: $alwaysPlainText)
+            }
             Section("自动清理") {
                 Picker("保留时长", selection: $retentionRaw) {
                     ForEach(RetentionPolicy.allCases) { policy in

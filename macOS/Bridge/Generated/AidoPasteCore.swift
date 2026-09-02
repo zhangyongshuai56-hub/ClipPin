@@ -578,9 +578,19 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
     func cleanupExpired(retention: Retention) throws  -> Int64
     
     /**
+     * 创建 Pinboard 文件夹。
+     */
+    func createBoard(name: String, color: String) throws  -> Board
+    
+    /**
      * 创建条目（自动去重，§17）。
      */
     func createItem(newItem: NewClipboardItem) throws  -> ClipboardItem
+    
+    /**
+     * 删除文件夹（其中条目回到默认「剪贴板」）。
+     */
+    func deleteBoard(id: Int64) throws 
     
     /**
      * 删除单条。
@@ -605,7 +615,7 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
     /**
      * 分页列出：置顶在前，其余按最近使用排序。
      */
-    func getItems(filter: ItemType?, limit: Int64, offset: Int64) throws  -> [ClipboardItem]
+    func getItems(filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64) throws  -> [ClipboardItem]
     
     /**
      * 置顶条目。
@@ -616,6 +626,11 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
      * 统计信息。
      */
     func getStatistics() throws  -> Statistics
+    
+    /**
+     * 全部文件夹。
+     */
+    func listBoards() throws  -> [Board]
     
     /**
      * Pin（§31）。
@@ -630,7 +645,12 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
     /**
      * 全文搜索（§29、§30）。
      */
-    func searchItems(query: String, filter: ItemType?, limit: Int64, offset: Int64) throws  -> [ClipboardItem]
+    func searchItems(query: String, filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64) throws  -> [ClipboardItem]
+    
+    /**
+     * 把条目移入 / 移出文件夹（None = 移回默认「剪贴板」）。
+     */
+    func setItemBoard(id: Int64, boardId: Int64?) throws 
     
     /**
      * 清扫孤儿图片文件（§48），返回删除数。
@@ -736,6 +756,20 @@ open func cleanupExpired(retention: Retention)throws  -> Int64  {
 }
     
     /**
+     * 创建 Pinboard 文件夹。
+     */
+open func createBoard(name: String, color: String)throws  -> Board  {
+    return try  FfiConverterTypeBoard_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_create_board(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(name),
+        FfiConverterString.lower(color),uniffiCallStatus
+    )
+})
+}
+    
+    /**
      * 创建条目（自动去重，§17）。
      */
 open func createItem(newItem: NewClipboardItem)throws  -> ClipboardItem  {
@@ -746,6 +780,18 @@ open func createItem(newItem: NewClipboardItem)throws  -> ClipboardItem  {
         FfiConverterTypeNewClipboardItem_lower(newItem),uniffiCallStatus
     )
 })
+}
+    
+    /**
+     * 删除文件夹（其中条目回到默认「剪贴板」）。
+     */
+open func deleteBoard(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_delete_board(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),uniffiCallStatus
+    )
+}
 }
     
     /**
@@ -802,12 +848,13 @@ open func getItem(id: Int64)throws  -> ClipboardItem  {
     /**
      * 分页列出：置顶在前，其余按最近使用排序。
      */
-open func getItems(filter: ItemType?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
+open func getItems(filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
     return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
         uniffiCallStatus in
     uniffi_aidopaste_core_fn_method_aidopastedatabase_get_items(
             self.uniffiCloneHandle(),
         FfiConverterOptionTypeItemType.lower(filter),
+        FfiConverterOptionInt64.lower(boardId),
         FfiConverterInt64.lower(limit),
         FfiConverterInt64.lower(offset),uniffiCallStatus
     )
@@ -841,6 +888,18 @@ open func getStatistics()throws  -> Statistics  {
 }
     
     /**
+     * 全部文件夹。
+     */
+open func listBoards()throws  -> [Board]  {
+    return try  FfiConverterSequenceTypeBoard.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_list_boards(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
      * Pin（§31）。
      */
 open func pinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
@@ -867,17 +926,31 @@ open func schemaVersion()throws  -> UInt32  {
     /**
      * 全文搜索（§29、§30）。
      */
-open func searchItems(query: String, filter: ItemType?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
+open func searchItems(query: String, filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
     return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
         uniffiCallStatus in
     uniffi_aidopaste_core_fn_method_aidopastedatabase_search_items(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(query),
         FfiConverterOptionTypeItemType.lower(filter),
+        FfiConverterOptionInt64.lower(boardId),
         FfiConverterInt64.lower(limit),
         FfiConverterInt64.lower(offset),uniffiCallStatus
     )
 })
+}
+    
+    /**
+     * 把条目移入 / 移出文件夹（None = 移回默认「剪贴板」）。
+     */
+open func setItemBoard(id: Int64, boardId: Int64?)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_set_item_board(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterOptionInt64.lower(boardId),uniffiCallStatus
+    )
+}
 }
     
     /**
@@ -950,6 +1023,71 @@ public func FfiConverterTypeAidoPasteDatabase_lower(_ value: AidoPasteDatabase) 
 }
 
 
+
+
+/**
+ * Pinboard 文件夹。
+ */
+public struct Board: Equatable, Hashable {
+    public var id: Int64
+    public var name: String
+    public var color: String
+    public var position: Int64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: Int64, name: String, color: String, position: Int64) {
+        self.id = id
+        self.name = name
+        self.color = color
+        self.position = position
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Board: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBoard: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Board {
+        return
+            try Board(
+                id: FfiConverterInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                color: FfiConverterString.read(from: &buf), 
+                position: FfiConverterInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Board, into buf: inout [UInt8]) {
+        FfiConverterInt64.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.color, into: &buf)
+        FfiConverterInt64.write(value.position, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoard_lift(_ buf: RustBuffer) throws -> Board {
+    return try FfiConverterTypeBoard.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBoard_lower(_ value: Board) -> RustBuffer {
+    return FfiConverterTypeBoard.lower(value)
+}
 
 
 /**
@@ -1740,6 +1878,31 @@ fileprivate struct FfiConverterSequenceInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeBoard: FfiConverterRustBuffer {
+    typealias SwiftType = [Board]
+
+    public static func write(_ value: [Board], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeBoard.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Board] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Board]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeBoard.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeClipboardItem: FfiConverterRustBuffer {
     typealias SwiftType = [ClipboardItem]
 
@@ -1805,7 +1968,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_cleanup_expired() != 31551) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_create_board() != 37905) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_create_item() != 62334) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_board() != 31403) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_item() != 7071) {
@@ -1820,7 +1989,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_item() != 60379) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_items() != 16813) {
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_items() != 24775) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_pinned_items() != 23763) {
@@ -1829,13 +1998,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_statistics() != 53924) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_list_boards() != 57174) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_pin_item() != 23454) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_schema_version() != 53774) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_search_items() != 7293) {
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_search_items() != 11447) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_set_item_board() != 37799) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_sweep_orphan_artifacts() != 60357) {

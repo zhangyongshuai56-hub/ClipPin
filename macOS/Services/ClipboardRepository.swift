@@ -29,9 +29,10 @@ actor ClipboardRepository {
     }
 
     /// 分页列出：置顶在前，其余按最近使用排序。
-    func items(type: ClipboardEntryType? = nil, limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
+    /// 分页列出。boardId 为 nil 表示默认「剪贴板」（全部历史）。
+    func items(boardId: Int64? = nil, limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
         try database
-            .getItems(filter: type.map(\.ffi), limit: Int64(limit), offset: Int64(offset))
+            .getItems(filter: nil, boardId: boardId, limit: Int64(limit), offset: Int64(offset))
             .map(ClipboardEntry.init)
     }
 
@@ -42,10 +43,30 @@ actor ClipboardRepository {
     }
 
     /// 全文搜索（§29、§30）。
-    func search(_ query: String, type: ClipboardEntryType? = nil, limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
+    /// 全文搜索。boardId 为 nil 表示全部。
+    func search(_ query: String, boardId: Int64? = nil, limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
         try database
-            .searchItems(query: query, filter: type.map(\.ffi), limit: Int64(limit), offset: Int64(offset))
+            .searchItems(query: query, filter: nil, boardId: boardId, limit: Int64(limit), offset: Int64(offset))
             .map(ClipboardEntry.init)
+    }
+
+    // MARK: - Pinboard 文件夹
+
+    func boards() throws -> [Pinboard] {
+        try database.listBoards().map(Pinboard.init)
+    }
+
+    func createBoard(name: String, color: String) throws -> Pinboard {
+        Pinboard(try database.createBoard(name: name, color: color))
+    }
+
+    func deleteBoard(id: Int64) throws {
+        try database.deleteBoard(id: id)
+    }
+
+    /// 移入文件夹；nil 表示移回默认「剪贴板」。
+    func setItemBoard(id: Int64, boardId: Int64?) throws {
+        try database.setItemBoard(id: id, boardId: boardId)
     }
 
     func delete(id: Int64) throws {

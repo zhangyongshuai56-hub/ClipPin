@@ -256,3 +256,64 @@ enum UserFacingError: LocalizedError, Sendable {
         }
     }
 }
+
+// MARK: - Pinboard 文件夹与粘贴设置
+
+/// Pinboard 文件夹（用户创建，用于收藏组织剪贴板条目）。
+struct Pinboard: Identifiable, Hashable, Sendable {
+    let id: Int64
+    let name: String
+    let color: String
+    let position: Int
+
+    init(_ board: Board) {
+        id = board.id
+        name = board.name
+        color = board.color
+        position = Int(board.position)
+    }
+}
+
+/// 粘贴项目默认操作（需求：设置界面可选）。
+enum DefaultPasteAction: String, CaseIterable, Sendable {
+    case activeApp
+    case clipboard
+
+    var title: String {
+        switch self {
+        case .activeApp: "到当前活动应用"
+        case .clipboard: "到剪贴板"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .activeApp: "将选定的项目直接粘贴到您当前正在使用的应用程序中。"
+        case .clipboard: "将选定的项目复制到系统剪贴板，以便稍后手动粘贴。"
+        }
+    }
+}
+
+enum PasteSettings {
+    static let defaultActionKey = "defaultPasteAction"
+    static let plainTextKey = "pastePlainText"
+
+    /// Enter / 双击执行的默认操作，默认粘贴到当前活动应用。
+    static var defaultAction: DefaultPasteAction {
+        DefaultPasteAction(rawValue: UserDefaults.standard.string(forKey: defaultActionKey) ?? "")
+            ?? .activeApp
+    }
+
+    static func setDefaultAction(_ action: DefaultPasteAction) {
+        UserDefaults.standard.set(action.rawValue, forKey: defaultActionKey)
+    }
+
+    /// 始终以纯文本粘贴。
+    static var alwaysPlainText: Bool {
+        UserDefaults.standard.bool(forKey: plainTextKey)
+    }
+
+    static func setAlwaysPlainText(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: plainTextKey)
+    }
+}

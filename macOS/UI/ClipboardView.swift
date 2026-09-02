@@ -1,15 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// 剪贴板底部快速操作面板（需求 §2、§20）：
-/// 搜索栏 → 分类 tabs → 卡片网格 → 快捷键提示条；呼出后搜索框默认聚焦（需求 §7）。
+/// 剪贴板底部快速操作面板（需求 §20，参考 Paste 界面）：
+/// 顶部栏（搜索按钮 + Pinboard 文件夹 chips + 新建）→ 单行卡片流 → 快捷键提示条。
 struct ClipboardView: View {
     @State private var viewModel: ClipboardViewModel
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
-    /// 键盘事件监听（§28、需求 §8/§19）：不依赖焦点状态，面板为 key 时统一接管。
+    /// 键盘事件监听（§28、需求 §8/§19）。
     @State private var keyMonitor: Any?
-    /// 网格区域实际宽度 → 列数。
-    @State private var gridColumns: Int = 4
+    /// 搜索模式：点击 🔍 后展开输入框（需求：搜索精简为按钮）。
+    @State private var isSearching = false
+    /// 新建文件夹弹窗。
+    @State private var isCreatingBoard = false
+    @State private var newBoardName = ""
 
     init(viewModel: ClipboardViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -21,16 +24,18 @@ struct ClipboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SearchBar(viewModel: viewModel)
-            CategoryTabs(viewModel: viewModel)
+            topBar
             Divider()
-            gridArea
+            shelfArea
             Divider()
-            StatusFooter(viewModel: viewModel)
+            StatusFooter(defaultAction: PasteSettings.defaultAction, totalCount: viewModel.entries.count)
         }
         .frame(minWidth: ClipboardWindow.minContentSize.width, minHeight: ClipboardWindow.minContentSize.height)
         .preferredColorScheme(appearance.colorScheme)
-        .task { await viewModel.loadInitial() }
+        .task {
+            await viewModel.loadInitial()
+            viewModel.requestSearchFocus()
+        }
         .onAppear { installKeyboardMonitor() }
         .onDisappear { removeKeyboardMonitor() }
         .overlay(alignment: .topTrailing) {
@@ -42,6 +47,18 @@ struct ClipboardView: View {
             }
         }
         .animation(.easeOut(duration: 0.15), value: viewModel.feedback)
+        .alert("新建文件夹", isPresented: $isCreatingBoard) {
+            TextField("文件夹名称", text: $newBoardName)
+            Button("创建") {
+                let name = newBoardName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                Task { await viewModel.createBoard(named: name) }
+                newBoardName = ""
+            }
+            Button("取消", role: .cancel) { newBoardName = "" }
+        } message: {
+            Text("创建后可把剪贴板条目收藏到这个文件夹。")
+        }
         .alert(
             "操作失败",
             isPresented: Binding(
@@ -69,57 +86,134 @@ struct ClipboardView: View {
         }
     }
 
-    // MARK: - 卡片网格（需求 §2、§8）
+    // MARK: - 顶部栏（需求：搜索精简为按钮 + Pinboard chips）
 
-    private var gridArea: some View {
-        GeometryReader { geometry in
-            Group {
-                if viewModel.entries.isEmpty {
-                    emptyState
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVGrid(
-                                columns: Array(
-                                    repeating: GridItem(.flexible(), spacing: 10),
-                                    count: gridColumns
-                                ),
-                                spacing: 10
-                            ) {
-                                ForEach(viewModel.entries) { entry in
-                                    card(entry)
-                                }
+    private var topBar: some View {
+        HStack(spacing: 8) {
+            if isSearching {
+                SearchField(viewModel: viewModel) {
+                    isSearching = false
+                }
+            } else {
+                Button {
+                    isSearching = true
+                    viewModel.requestSearchFocus()
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("搜索")
+                .keyboardShortcut("f", modifiers: .command)
+            }
+
+            boardChips
+
+            Spacer(minLength: 0)
+
+            Button {
+                isCreatingBoard = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("新建文件夹")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    /// 板 chips：默认「剪贴板」+ 用户创建的文件夹。
+    private var boardChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                boardChip(
+                    title: "剪贴板",
+                    color: nil,
+                    isSelected: viewModel.selectedBoardID == nil,
+                    boardID: nil
+                )
+                ForEach(viewModel.boards) { board in
+                    boardChip(
+                        title: board.name,
+                        color: Color(hex: board.color),
+                        isSelected: viewModel.selectedBoardID == board.id,
+                        boardID: board.id
+                    )
+                }
+            }
+        }
+        .scrollDisabled(viewModel.boards.count < 3)
+    }
+
+    private func boardChip(title: String, color: Color?, isSelected: Bool, boardID: Int64?) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color ?? Color.accentColor)
+                .frame(width: 8, height: 8)
+            Text(title)
+                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05),
+            in: Capsule()
+        )
+        .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.75))
+        .contentShape(Capsule())
+        .onTapGesture { viewModel.selectedBoardID = boardID }
+        .contextMenu {
+            if boardID != nil {
+                Button("删除文件夹", role: .destructive) {
+                    if let board = viewModel.boards.first(where: { $0.id == boardID }) {
+                        Task { await viewModel.deleteBoard(board) }
+                    }
+                }
+            }
+        }
+        .accessibilityLabel("\(title)文件夹")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    // MARK: - 卡片流（需求 §2：单行横向，参考 Paste）
+
+    private var shelfArea: some View {
+        Group {
+            if viewModel.entries.isEmpty {
+                emptyState
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(spacing: 12) {
+                            ForEach(viewModel.entries) { entry in
+                                card(entry)
                             }
-                            .padding(14)
                             if viewModel.isLoading {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .padding(8)
+                                    .frame(width: 60)
                             }
                         }
-                        .onChange(of: viewModel.selectionID) { _, newID in
-                            guard let newID else { return }
+                        .padding(14)
+                    }
+                    .onChange(of: viewModel.selectionID) { _, newID in
+                        guard let newID else { return }
+                        withAnimation(.easeOut(duration: 0.15)) {
                             proxy.scrollTo(newID, anchor: .center)
                         }
                     }
                 }
             }
-            .onChange(of: geometry.size.width) { _, width in
-                applyGridColumns(width: width)
-            }
-            .onAppear {
-                applyGridColumns(width: geometry.size.width)
-            }
         }
-    }
-
-    /// 卡片宽约 226pt（+10 间距），列数随面板宽度自适应（需求 §3 可调宽）。
-    /// 列数不变时不写 @Observable 属性，避免拖拽调宽时每帧触发全网格重排（卡顿根因）。
-    private func applyGridColumns(width: CGFloat) {
-        let columns = max(1, Int((width - 28 + 10) / 236))
-        guard columns != gridColumns else { return }
-        gridColumns = columns
-        viewModel.gridColumns = columns
+        .frame(maxHeight: .infinity)
     }
 
     private func card(_ entry: ClipboardEntry) -> some View {
@@ -127,24 +221,23 @@ struct ClipboardView: View {
             .id(entry.id)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                // 双击执行默认操作：粘贴到当前应用（需求 §8、§17）
-                Task { await viewModel.pasteToActiveApplication(entry) }
+                // 双击执行默认操作（需求 §8、§17）
+                Task { await viewModel.performDefaultAction(entry) }
             }
             .onTapGesture {
                 viewModel.selectionID = entry.id
             }
             .contextMenu { contextMenu(for: entry) }
-            // §36：拖拽导出 —— 图片/文件/文本/链接以系统标准形式交给目标 App
+            // §36：拖拽导出
             .onDrag { dragProvider(for: entry) }
             .onAppear {
-                // 滚动到最后一张时加载下一页（§58）
                 if entry.id == viewModel.entries.last?.id {
                     Task { await viewModel.loadNextPageIfNeeded() }
                 }
             }
     }
 
-    /// 右键菜单（§66）：两操作明确区分（需求 §11）。
+    /// 右键菜单（需求 §9/§10/§66 + 文件夹收藏）。
     @ViewBuilder
     private func contextMenu(for entry: ClipboardEntry) -> some View {
         Button("粘贴到当前应用") {
@@ -152,18 +245,27 @@ struct ClipboardView: View {
         }
         Button("复制到剪贴板") { viewModel.copyToClipboard(entry) }
         Divider()
-        Button(entry.isPinned ? "取消收藏" : "收藏") {
-            Task { await viewModel.togglePin(entry) }
+        if let currentBoard = viewModel.selectedBoardID {
+            Button("移出当前文件夹") {
+                Task { await viewModel.move(entry, toBoard: nil) }
+            }
         }
-        if entry.itemType == .file || entry.itemType == .folder {
-            Button("在 Finder 中显示") { viewModel.revealInFinder(entry) }
+        Menu("移入文件夹") {
+            ForEach(viewModel.boards) { board in
+                Button(board.name) {
+                    Task { await viewModel.move(entry, toBoard: board.id) }
+                }
+            }
+            if viewModel.boards.isEmpty {
+                Text("暂无文件夹，点 + 创建")
+            }
         }
-        if entry.itemType == .url {
-            Button("打开链接") { viewModel.openLink(entry) }
-        }
-        if entry.itemType == .file || entry.itemType == .folder || entry.itemType == .url {
-            Divider()
-        }
+        Divider()
+        Button("在 Finder 中显示") { viewModel.revealInFinder(entry) }
+            .disabled(entry.itemType != .file && entry.itemType != .folder)
+        Button("打开链接") { viewModel.openLink(entry) }
+            .disabled(entry.itemType != .url)
+        Divider()
         Button("删除", role: .destructive) {
             Task { await viewModel.delete(entry) }
         }
@@ -198,11 +300,11 @@ struct ClipboardView: View {
     private var emptyState: some View {
         if viewModel.isSearchActive {
             ContentUnavailableView.search(text: viewModel.searchText)
-        } else if viewModel.category == .pinned {
+        } else if viewModel.selectedBoardID != nil {
             ContentUnavailableView {
-                Label("还没有收藏内容", systemImage: "pin")
+                Label("文件夹是空的", systemImage: "folder")
             } description: {
-                Text("选中条目按 ⌘P 即可收藏，收藏内容不会被自动清理。")
+                Text("右键点击剪贴板条目，选择「移入文件夹」即可收藏到这里。")
             }
         } else {
             ContentUnavailableView {
@@ -213,7 +315,7 @@ struct ClipboardView: View {
         }
     }
 
-    // MARK: - 键盘（§28、需求 §8/§19）
+    // MARK: - 键盘（§28、需求 §19）
 
     private func installKeyboardMonitor() {
         guard keyMonitor == nil else { return }
@@ -227,8 +329,6 @@ struct ClipboardView: View {
         }
     }
 
-    /// 键盘优先操作。返回 nil 表示事件已被消费。
-    /// 搜索框输入的普通字符不接管；⌘C 在搜索框存在选中文本时放行给系统。
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         guard let window = NSApp.keyWindow, window is ClipboardWindow else { return event }
 
@@ -236,39 +336,35 @@ struct ClipboardView: View {
         let characters = (event.charactersIgnoringModifiers ?? "").lowercased()
 
         switch event.keyCode {
-        case 125: // ↓
-            viewModel.moveInGrid(.down)
-            return nil
-        case 126: // ↑
-            viewModel.moveInGrid(.up)
-            return nil
         case 123: // ←
-            viewModel.moveInGrid(.left)
+            viewModel.moveInShelf(.left)
             return nil
         case 124: // →
-            viewModel.moveInGrid(.right)
+            viewModel.moveInShelf(.right)
             return nil
-        case 36, 76: // Enter / ⌘Enter：粘贴到当前活动应用（需求 §17 默认操作）
+        case 36, 76: // Enter：默认操作；⌘Enter：始终粘贴到当前应用
             guard let entry = viewModel.selectedEntry else { return event }
-            Task { await viewModel.pasteToActiveApplication(entry) }
+            if commandPressed {
+                Task { await viewModel.pasteToActiveApplication(entry) }
+            } else {
+                Task { await viewModel.performDefaultAction(entry) }
+            }
             return nil
         case 8: // ⌘C：复制到系统剪贴板（需求 §10）
             guard commandPressed, let entry = viewModel.selectedEntry else { return event }
             viewModel.copyToClipboard(entry)
             return nil
-        case 35: // ⌘P：收藏 / 取消收藏
-            guard commandPressed, let entry = viewModel.selectedEntry else { return event }
-            Task { await viewModel.togglePin(entry) }
-            return nil
-        case 51, 117: // Delete / Forward delete：删除
+        case 51, 117: // Delete：删除
             guard let entry = viewModel.selectedEntry else { return event }
             Task { await viewModel.delete(entry) }
             return nil
-        case 53: // Esc：有搜索词先清空，否则关闭面板（需求 §6）
-            if viewModel.searchText.isEmpty {
-                WindowManager.shared.hideClipboardWindow()
-            } else {
+        case 53: // Esc：搜索中先清空 → 退出搜索 → 关闭面板
+            if !viewModel.searchText.isEmpty {
                 viewModel.searchText = ""
+            } else if isSearching {
+                isSearching = false
+            } else {
+                WindowManager.shared.hideClipboardWindow()
             }
             return nil
         default:
@@ -277,22 +373,60 @@ struct ClipboardView: View {
     }
 }
 
-/// 底部快捷键提示条（需求 §20）。
+/// 搜索输入框（点击 🔍 后展开）。
+struct SearchField: View {
+    @Bindable var viewModel: ClipboardViewModel
+    var onExitSearch: () -> Void
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("搜索剪贴板…", text: $viewModel.searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .focused($searchFocused)
+                .accessibilityLabel("搜索剪贴板")
+            Button {
+                viewModel.searchText = ""
+                onExitSearch()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("退出搜索")
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .onAppear { searchFocused = true }
+        .onChange(of: viewModel.searchFocusRequest) {
+            searchFocused = true
+        }
+    }
+}
+
+/// 底部快捷键提示条（需求 §20）：随默认操作设置变化。
 struct StatusFooter: View {
-    var viewModel: ClipboardViewModel
+    let defaultAction: DefaultPasteAction
+    let totalCount: Int
 
     var body: some View {
         HStack(spacing: 14) {
-            shortcut("↩", "粘贴到当前应用")
+            shortcut("↩", defaultAction == .activeApp ? "粘贴到当前应用" : "复制到剪贴板")
+            if defaultAction == .activeApp {
+                shortcut("⌘↩", "粘贴到当前应用")
+            } else {
+                shortcut("⌘↩", "粘贴到当前应用")
+            }
             shortcut("⌘C", "复制到剪贴板")
-            shortcut("⌘P", "收藏")
             shortcut("⌫", "删除")
             shortcut("Esc", "关闭")
             Spacer(minLength: 0)
-            if let total = viewModel.categoryCounts[.all] {
-                Text("\(total) 条记录")
-                    .foregroundStyle(.tertiary)
-            }
+            Text("\(totalCount) 条记录")
+                .foregroundStyle(.tertiary)
         }
         .font(.system(size: 11.5))
         .foregroundStyle(.secondary)
@@ -312,6 +446,25 @@ struct StatusFooter: View {
     }
 }
 
+extension Color {
+    /// "#RRGGBB" → Color；非法输入回退为强调色。
+    init(hex: String) {
+        let value = hex.trimmingCharacters(in: .whitespaces)
+        guard value.hasPrefix("#"), value.count == 7,
+              let rgb = Int(value.dropFirst(), radix: 16)
+        else {
+            self = .accentColor
+            return
+        }
+        self = Color(
+            red: Double((rgb >> 16) & 0xFF) / 255,
+            green: Double((rgb >> 8) & 0xFF) / 255,
+            blue: Double(rgb & 0xFF) / 255
+        )
+    }
+}
+
+
 /// 操作反馈 toast（需求 §18）。
 struct FeedbackToast: View {
     let feedback: OperationFeedback
@@ -325,6 +478,7 @@ struct FeedbackToast: View {
                 ProgressView().controlSize(.small)
                 Text("正在粘贴…")
             }
+            .foregroundStyle(.white)
             .toastStyle()
         case .pasted(let app):
             HStack(spacing: 7) {
@@ -358,47 +512,5 @@ extension View {
             .padding(.vertical, 8)
             .background(background, in: Capsule())
             .shadow(color: .black.opacity(0.22), radius: 10, y: 4)
-    }
-}
-
-
-/// 分类横排 tabs（需求 §2）：全部 / 收藏 / 文本 / 图片 / 链接 / 文件，带计数角标。
-struct CategoryTabs: View {
-    var viewModel: ClipboardViewModel
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(ClipboardCategory.allCases) { category in
-                let isActive = category == viewModel.category
-                Button {
-                    viewModel.category = category
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: category.symbolName)
-                            .font(.system(size: 10.5))
-                        Text(category.title)
-                            .font(.system(size: 12.5, weight: isActive ? .semibold : .regular))
-                        if let count = viewModel.categoryCounts[category] {
-                            Text("\(count)")
-                                .font(.system(size: 10.5))
-                                .opacity(0.6)
-                        }
-                    }
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(
-                        isActive ? Color.accentColor.opacity(0.13) : Color.clear,
-                        in: Capsule()
-                    )
-                    .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(category.title)分类")
-                .accessibilityAddTraits(isActive ? .isSelected : [])
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 }

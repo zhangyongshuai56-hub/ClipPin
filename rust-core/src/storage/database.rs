@@ -13,7 +13,9 @@ use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use crate::cleanup::cleanup_manager::Retention;
 use crate::clipboard::classifier;
 use crate::clipboard::dedup;
-use crate::clipboard::model::{ClipboardItem, ItemType, NewClipboardItem, Statistics, now_ms};
+use crate::clipboard::model::{
+    Board, ClipboardItem, ItemType, NewClipboardItem, Statistics, now_ms,
+};
 use crate::error::{AidoPasteError, Result};
 use crate::storage::image_store::ImageStore;
 
@@ -24,7 +26,7 @@ type Artifacts = (Option<String>, Option<String>);
 const MAX_PAGE_SIZE: usize = 1000;
 
 /// 当前 schema 版本。
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// 迁移 SQL 列表，下标 `i` 对应目标版本 `i + 1`。
 /// 只允许追加新版本，禁止修改历史条目（§47）。
@@ -81,6 +83,20 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO clipboard_fts(rowid, title, text_content, url, file_path, source_app_name)
         VALUES (new.id, new.title, new.text_content, new.url, new.file_path, new.source_app_name);
     END;
+    ",
+    // v2：Pinboard 文件夹（需求：支持创建文件夹收藏剪贴板条目）。
+    // board_id 为 NULL 表示在默认「剪贴板」收藏夹；加入文件夹的条目豁免自动清理。
+    "
+    CREATE TABLE boards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#4F8EF7',
+        position INTEGER NOT NULL DEFAULT 0
+    );
+
+    ALTER TABLE clipboard_items ADD COLUMN board_id INTEGER;
+
+    CREATE INDEX idx_clipboard_items_board ON clipboard_items(board_id);
     ",
 ];
 
@@ -241,11 +257,12 @@ impl Database {
     pub fn get_items(
         &self,
         filter: Option<ItemType>,
+        board_id: Option<i64>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ClipboardItem>> {
         let conn = self.lock_conn()?;
-        list_items(&conn, filter, limit.min(MAX_PAGE_SIZE), offset)
+        list_items(&conn, filter, board_id, limit.min(MAX_PAGE_SIZE), offset)
     }
 
     /// 置顶条目（§31），按最近使用排序。
@@ -268,11 +285,19 @@ impl Database {
         &self,
         query: &str,
         filter: Option<ItemType>,
+        board_id: Option<i64>,
         limit: usize,
         offset: usize,
     ) -> Result<Vec<ClipboardItem>> {
         let conn = self.lock_conn()?;
-        crate::search::search_engine::search(&conn, query, filter, limit.min(MAX_PAGE_SIZE), offset)
+        crate::search::search_engine::search(
+            &conn,
+            query,
+            filter,
+            board_id,
+            limit.min(MAX_PAGE_SIZE),
+            offset,
+        )
     }
 
     /// 删除单条，并同步清理图片产物文件（§32）。
@@ -347,7 +372,7 @@ impl Database {
             return Ok(0);
         };
         let cutoff = now_ms - (days as i64) * 86_400_000;
-        let criteria = "WHERE is_pinned = 0 AND updated_at < ?1";
+        let criteria = "WHERE is_pinned = 0 AND board_id IS NULL AND updated_at < ?1";
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
         let mut artifacts = fetch_artifacts_where(&tx, criteria, params![cutoff])?;
@@ -370,8 +395,8 @@ impl Database {
 
     /// 历史条数上限（§50）：超出部分从最旧的非 Pin 条目删起，图片产物一并清理。
     pub fn enforce_history_limit(&self, max_count: usize) -> Result<usize> {
-        let selection = "WHERE is_pinned = 0 AND id IN (
-                 SELECT id FROM clipboard_items WHERE is_pinned = 0
+        let selection = "WHERE is_pinned = 0 AND board_id IS NULL AND id IN (
+                 SELECT id FROM clipboard_items WHERE is_pinned = 0 AND board_id IS NULL
                  ORDER BY updated_at DESC, id DESC
                  LIMIT -1 OFFSET ?1
              )";
@@ -420,6 +445,81 @@ impl Database {
         drop(stmt);
         drop(conn);
         self.image_store.sweep_orphans(&referenced)
+    }
+
+    /// 创建 Pinboard 文件夹。
+    pub fn create_board(&self, name: &str, color: &str) -> Result<Board> {
+        let conn = self.lock_conn()?;
+        let max_position: i64 =
+            conn.query_row("SELECT COALESCE(MAX(position), 0) FROM boards", [], |row| {
+                row.get(0)
+            })?;
+        conn.execute(
+            "INSERT INTO boards (name, color, position) VALUES (?1, ?2, ?3)",
+            params![name, color, max_position + 1],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(Board {
+            id,
+            name: name.to_string(),
+            color: color.to_string(),
+            position: max_position + 1,
+        })
+    }
+
+    /// 删除文件夹：其中条目回到默认「剪贴板」（board_id 置空），条目本身不删除。
+    pub fn delete_board(&self, id: i64) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let affected_items = conn.execute(
+            "UPDATE clipboard_items SET board_id = NULL WHERE board_id = ?1",
+            params![id],
+        )?;
+        let affected = conn.execute("DELETE FROM boards WHERE id = ?1", params![id])?;
+        if affected == 0 {
+            return Err(AidoPasteError::NotFound(id));
+        }
+        log::info!(target: "aidopaste", "board deleted id={id} items_released={affected_items}");
+        Ok(())
+    }
+
+    /// 全部文件夹（按创建顺序）。
+    pub fn list_boards(&self) -> Result<Vec<Board>> {
+        let conn = self.lock_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT id, name, color, position FROM boards ORDER BY position, id")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Board {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                position: row.get(3)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(AidoPasteError::from)
+    }
+
+    /// 把条目移入文件夹（board_id = NULL 表示移回默认「剪贴板」）。
+    pub fn set_item_board(&self, item_id: i64, board_id: Option<i64>) -> Result<()> {
+        let conn = self.lock_conn()?;
+        if let Some(board) = board_id {
+            let exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM boards WHERE id = ?1",
+                params![board],
+                |row| row.get(0),
+            )?;
+            if exists == 0 {
+                return Err(AidoPasteError::NotFound(board));
+            }
+        }
+        let affected = conn.execute(
+            "UPDATE clipboard_items SET board_id = ?2 WHERE id = ?1",
+            params![item_id, board_id],
+        )?;
+        if affected == 0 {
+            return Err(AidoPasteError::NotFound(item_id));
+        }
+        Ok(())
     }
 
     /// 统计信息（§54 get_statistics）。
@@ -616,14 +716,24 @@ fn with_language(metadata: Option<&str>, lang: &str) -> String {
 pub(crate) fn list_items(
     conn: &Connection,
     filter: Option<ItemType>,
+    board_id: Option<i64>,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>> {
     let mut sql = String::from("SELECT * FROM clipboard_items");
     let mut values: Vec<Value> = Vec::new();
+    let mut clauses: Vec<String> = Vec::new();
     if let Some(item_type) = filter {
-        sql.push_str(" WHERE type = ?");
+        clauses.push("type = ?".into());
         values.push(Value::Text(item_type.as_str().into()));
+    }
+    if let Some(board) = board_id {
+        clauses.push("board_id = ?".into());
+        values.push(Value::Integer(board));
+    }
+    if !clauses.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&clauses.join(" AND "));
     }
     let limit_index = values.len() + 1;
     let offset_index = values.len() + 2;
