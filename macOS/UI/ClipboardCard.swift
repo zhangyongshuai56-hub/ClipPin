@@ -143,28 +143,33 @@ final class ThumbnailCache {
     }
 }
 
-/// 本地缩略图加载（经缓存）。side > 0 时为正方形，否则撑满宽度。
+/// 本地缩略图加载（经缓存）。
+/// side > 0 时为正方形；side == 0 时占满调用方给定的尺寸（需由调用方提供高度）。
+/// 用 Color.clear + overlay + clipped 的组合保证 aspect-fill 溢出部分被裁掉，
+/// 避免大图按原始尺寸绘制溢出卡片边界。
 struct ThumbnailImage: View {
     let path: String?
     let side: CGFloat
 
     var body: some View {
-        Group {
-            if let path, let image = ThumbnailCache.shared.image(for: path) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    Rectangle().fill(Color.primary.opacity(0.08))
-                    Image(systemName: "photo")
-                        .foregroundStyle(.secondary)
+        Color.clear
+            .overlay {
+                if let path, let image = ThumbnailCache.shared.image(for: path) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        Rectangle().fill(Color.primary.opacity(0.08))
+                        Image(systemName: "photo")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-        }
-        .frame(width: side > 0 ? side : nil, height: side > 0 ? side : nil)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .accessibilityLabel("图片预览")
+            .frame(width: side > 0 ? side : nil, height: side > 0 ? side : nil)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .accessibilityLabel("图片预览")
     }
 }
 
