@@ -14,14 +14,6 @@ struct SearchBar: View {
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
                 .accessibilityLabel("搜索剪贴板")
-                .onExitCommand {
-                    // Esc：搜索时先清空搜索词，无搜索词则关闭窗口（§28）
-                    if viewModel.searchText.isEmpty {
-                        WindowManager.shared.hideClipboardWindow()
-                    } else {
-                        viewModel.searchText = ""
-                    }
-                }
             if !viewModel.searchText.isEmpty {
                 Button {
                     viewModel.searchText = ""

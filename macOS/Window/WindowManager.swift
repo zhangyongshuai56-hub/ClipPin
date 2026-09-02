@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 import os
 
-/// 窗口生命周期管理。仅在主线程访问。
+/// 窗口生命周期管理（需求 §1~§6）。仅在主线程访问。
 @MainActor
-final class WindowManager {
+final class WindowManager: NSObject, NSWindowDelegate {
     static let shared = WindowManager()
 
     private let logger = Logger(subsystem: "com.aidopaste.app", category: "window")
@@ -13,30 +13,40 @@ final class WindowManager {
     /// 窗口内容使用的 ViewModel；随窗口内容一起释放。
     private weak var viewModel: ClipboardViewModel?
 
-    /// 显示剪贴板窗口（§26）：出现在鼠标所在屏幕、靠近鼠标的位置（§27）。
-    /// Core 未就绪时记录错误并忽略，不崩溃。
-    func showClipboardWindow(focusSearch: Bool = false) {
+    /// 面板尺寸持久化键（需求 §4）。
+    private static let panelSizeKey = "panelSize"
+    /// 面板显示时刻：用于「点击外部关闭」的防误关宽限期。
+    private var shownAt = Date.distantPast
+    private var resignObserver: NSObjectProtocol?
+
+    /// 显示剪贴板面板（需求 §1、§7）：出现在鼠标所在屏幕底部居中，聚焦搜索框。
+    func showClipboardWindow(focusSearch: Bool = true) {
         guard let repository = CoreStore.shared.repository else {
             logger.error("clipboard window requested before core is ready")
             return
         }
         // §37：在激活自己之前记录前台应用，作为 Quick Paste 的粘贴目标
         PasteService.shared.noteWindowAboutToShow()
-        let window = clipboardWindow ?? makeClipboardWindow(repository: repository)
-        positionWindowNearMouse(window)
+
+        let savedSize = Self.loadPanelSize()
+        let window = clipboardWindow ?? makeClipboardWindow(repository: repository, contentSize: savedSize)
+        positionAtBottomCenter(window)
+
+        shownAt = Date()
         // §64：呼出淡入（100~250ms 内）
         window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
-        logger.info("panel ordered front visible=\(window.isVisible) key=\(window.isKeyWindow) alpha=\(window.alphaValue)")
         NSApp.activate(ignoringOtherApps: true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
-        if focusSearch {
-            viewModel?.requestSearchFocus()
+        // 需求 §7：呼出后搜索框默认聚焦，可直接输入
+        if focusSearch, let viewModel {
+            viewModel.requestSearchFocus()
         }
+        installResignObserverIfNeeded()
     }
 
     /// 全局快捷键行为（§26）：未显示 → 呼出并聚焦搜索；已显示 → 隐藏。
@@ -44,13 +54,12 @@ final class WindowManager {
         if let window = clipboardWindow, window.isVisible {
             hideClipboardWindow()
         } else {
-            showClipboardWindow(focusSearch: true)
+            showClipboardWindow()
         }
     }
 
-    /// 隐藏剪贴板窗口（Esc / 失焦 / Quick Paste，§28、§64）。淡出后保留状态。
+    /// 隐藏面板（Esc / 点击外部 / Quick Paste，§28、需求 §6）。淡出后保留状态。
     func hideClipboardWindow() {
-        logger.info("hide requested")
         guard let window = clipboardWindow, window.isVisible else { return }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
@@ -69,19 +78,64 @@ final class WindowManager {
         clipboardWindow?.appearance = AppearanceMode.stored.nsAppearance
     }
 
-    private func makeClipboardWindow(repository: ClipboardRepository) -> ClipboardWindow {
+    // MARK: - 创建与 delegate
+
+    private func makeClipboardWindow(repository: ClipboardRepository, contentSize: NSSize) -> ClipboardWindow {
         let viewModel = ClipboardViewModel(repository: repository)
         self.viewModel = viewModel
-        let window = ClipboardWindow(rootView: ClipboardView(viewModel: viewModel))
+        let window = ClipboardWindow(rootView: ClipboardView(viewModel: viewModel), contentSize: contentSize)
+        window.delegate = self
         clipboardWindow = window
         return window
     }
 
-    // MARK: - 定位（§27）
+    /// 拖拽调宽高时按当前屏幕可用区钳制（需求 §3：最大接近屏幕可用区域）。
+    nonisolated func windowWillResize(_ sender: NSWindow, to frame: NSSize) -> NSSize {
+        var size = frame
+        MainActor.assumeIsolated {
+            guard let screen = sender.screen ?? NSScreen.main else { return }
+            let visible = screen.visibleFrame
+            let margin: CGFloat = 24
+            size.width = min(max(size.width, ClipboardWindow.minContentSize.width), visible.width - margin * 2)
+            size.height = min(max(size.height, ClipboardWindow.minContentSize.height), visible.height - margin * 2)
+        }
+        return size
+    }
 
-    /// 窗口出现在鼠标附近：以鼠标所在屏幕的可见区域为界（自动避开菜单栏、Dock、刘海区域），
-    /// 水平以鼠标为中心，垂直大致与鼠标对齐；越界时收进可见区域，保证不超出屏幕。
-    private func positionWindowNearMouse(_ window: NSWindow) {
+    /// 需求 §4：记住用户最后使用的窗口尺寸。
+    nonisolated func windowDidEndLiveResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        MainActor.assumeIsolated {
+            let size = window.frame.size
+            UserDefaults.standard.set("\(Int(size.width))x\(Int(size.height))", forKey: Self.panelSizeKey)
+            logger.info("panel size saved \(Int(size.width))x\(Int(size.height))")
+        }
+    }
+
+    /// 需求 §6：点击窗口外部关闭。带 600ms 宽限期防误关；粘贴进行中不关闭。
+    private func installResignObserverIfNeeded() {
+        guard resignObserver == nil else { return }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.clipboardWindow, window.isVisible else { return }
+                // 宽限期：呼出瞬间的小失活不关（需求 §6 防误关）
+                guard Date().timeIntervalSince(self.shownAt) > 0.6 else { return }
+                // Quick Paste 进行中不关（激活目标应用会触发失活）
+                guard !PasteService.shared.isBusy else { return }
+                self.hideClipboardWindow()
+            }
+        }
+    }
+
+    // MARK: - 定位与尺寸
+
+    /// 需求 §1/§5：面板出现在鼠标所在屏幕底部居中（无法确定时回退主屏）。
+    /// visibleFrame 已扣除菜单栏 / Dock / 刘海。
+    private func positionAtBottomCenter(_ window: NSWindow) {
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
         guard let screen else {
@@ -90,15 +144,22 @@ final class WindowManager {
         }
         let visibleFrame = screen.visibleFrame
         let size = window.frame.size
-        var origin = CGPoint(
-            x: mouseLocation.x - size.width / 2,
-            y: mouseLocation.y - size.height * 0.6
+        let bottomMargin: CGFloat = 12
+        let origin = CGPoint(
+            x: visibleFrame.midX - size.width / 2,
+            y: visibleFrame.minY + bottomMargin
         )
-        origin.x = max(visibleFrame.minX, min(origin.x, visibleFrame.maxX - size.width))
-        origin.y = max(visibleFrame.minY, min(origin.y, visibleFrame.maxY - size.height))
-        // 屏幕比窗口还小（极端分辨率）时兜底取可见区左下角
-        origin.x = max(origin.x, visibleFrame.minX)
-        origin.y = max(origin.y, visibleFrame.minY)
         window.setFrameOrigin(origin)
+    }
+
+    static func loadPanelSize() -> NSSize {
+        guard let text = UserDefaults.standard.string(forKey: panelSizeKey) else {
+            return ClipboardWindow.defaultContentSize
+        }
+        let parts = text.split(separator: "x").compactMap { Double($0) }
+        guard parts.count == 2, parts[0] >= 700, parts[1] >= 300 else {
+            return ClipboardWindow.defaultContentSize
+        }
+        return NSSize(width: parts[0], height: parts[1])
     }
 }

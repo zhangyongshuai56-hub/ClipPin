@@ -3,7 +3,7 @@ import Combine
 import Foundation
 import Observation
 
-/// 侧栏历史分类（§22）。分类过滤为精确单类型；folder 等类型暂归"全部"显示。
+/// 侧栏 / 面板分类（需求 §2）。分类过滤为精确单类型；folder 等类型暂归"全部"显示。
 enum ClipboardCategory: String, CaseIterable, Identifiable {
     case all
     case pinned
@@ -17,7 +17,7 @@ enum ClipboardCategory: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .all: "全部"
-        case .pinned: "置顶"
+        case .pinned: "收藏"
         case .text: "文本"
         case .images: "图片"
         case .links: "链接"
@@ -48,7 +48,22 @@ enum ClipboardCategory: String, CaseIterable, Identifiable {
     }
 }
 
-/// 剪贴板主界面状态（§56）。只管理列表 / 搜索 / 选择 / 动作，不含 UI 布局。
+/// 操作反馈状态（需求 §18）：执行后必须有明确反馈，不静默。
+enum OperationFeedback: Equatable {
+    case idle
+    case pasting
+    /// 粘贴成功，附带目标应用名（如「已粘贴到 Safari」）。
+    case pasted(String)
+    case copied
+    case failed(String)
+}
+
+/// 二维网格导航方向（需求 §8：↑↓←→）。
+enum GridDirection {
+    case up, down, left, right
+}
+
+/// 剪贴板面板状态（§56）：列表 / 搜索 / 网格选择 / 动作 / 反馈。
 @MainActor
 @Observable
 final class ClipboardViewModel {
@@ -59,8 +74,12 @@ final class ClipboardViewModel {
     private(set) var isLoading = false
     private(set) var canLoadMore = false
     var errorMessage: String?
-    /// Quick Paste 缺少辅助功能权限时弹出引导（§38）。
+    /// Quick Paste 缺少辅助功能权限时弹出引导（需求 §15）。
     var showAccessibilityPrompt = false
+    private(set) var feedback: OperationFeedback = .idle
+    private var feedbackResetTask: Task<Void, Never>?
+    /// 分类计数（tabs 角标）。
+    private(set) var categoryCounts: [ClipboardCategory: Int] = [:]
 
     /// 当前选中的条目。
     var selectedEntry: ClipboardEntry? {
@@ -88,6 +107,9 @@ final class ClipboardViewModel {
     /// 搜索框聚焦请求计数；SearchBar 观察该值变化后聚焦。
     private(set) var searchFocusRequest = 0
 
+    /// 网格列数（视图随窗口宽度计算后写入），供 ↑↓←→ 二维导航使用。
+    var gridColumns: Int = 4
+
     /// 分页（§58）。
     private let pageSize = 50
 
@@ -100,13 +122,13 @@ final class ClipboardViewModel {
             .publisher(for: .clipboardMonitorDidSaveItem)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                Task { await self?.load(reset: true) }
+                Task { await self?.refresh() }
             }
     }
 
     // MARK: - 加载
 
-    /// 首次显示窗口时加载。
+    /// 首次显示面板时加载。
     func loadInitial() async {
         await load(reset: true)
     }
@@ -148,15 +170,38 @@ final class ClipboardViewModel {
             }
             canLoadMore = page.count == pageSize
             fixSelection()
+            await updateCounts()
         } catch {
             setError(error)
         }
     }
 
+    /// 监听器新入库 / 复制 touch 后的刷新。
+    func refresh() async {
+        await load(reset: true)
+    }
+
+    private func updateCounts() async {
+        guard let stats = try? await repository.statistics() else { return }
+        var counts: [ClipboardCategory: Int] = [
+            .all: Int(stats.totalCount),
+            .pinned: Int(stats.pinnedCount),
+        ]
+        for (type, count) in stats.byType {
+            switch type {
+            case .text: counts[.text, default: 0] += Int(count)
+            case .url: counts[.links, default: 0] += Int(count)
+            case .image: counts[.images, default: 0] += Int(count)
+            case .file, .folder: counts[.files, default: 0] += Int(count)
+            default: break
+            }
+        }
+        categoryCounts = counts
+    }
+
     private func scheduleSearch() {
         searchTask?.cancel()
         guard isSearchActive else {
-            // 搜索词清空后立即恢复完整列表
             Task { await load(reset: true) }
             return
         }
@@ -177,51 +222,75 @@ final class ClipboardViewModel {
         selectionID = entries.first?.id
     }
 
-    // MARK: - 键盘导航（§28）
+    // MARK: - 二维网格导航（需求 §8：↑↓←→）
 
-    /// ↑/↓ 移动选择；direction 为 +1（下）/ -1（上）。
-    func moveSelection(_ direction: Int) {
+    func moveInGrid(_ direction: GridDirection) {
         guard !entries.isEmpty else { return }
-        let currentIndex = entries.firstIndex { $0.id == selectionID }
-        let nextIndex: Int
-        switch currentIndex {
-        case .some(let index): nextIndex = min(max(index + direction, 0), entries.count - 1)
-        case nil: nextIndex = direction >= 0 ? 0 : entries.count - 1
+        let columns = max(gridColumns, 1)
+        guard let index = entries.firstIndex(where: { $0.id == selectionID }) else {
+            selectionID = entries.first?.id
+            return
         }
-        selectionID = entries[nextIndex].id
+        let row = index / columns
+        let column = index % columns
+        var targetRow = row
+        var targetColumn = column
+        switch direction {
+        case .up: targetRow = row - 1
+        case .down: targetRow = row + 1
+        case .left: targetColumn = column - 1
+        case .right: targetColumn = column + 1
+        }
+        // 左右在行边界处保持原位（不做环形回绕）
+        guard targetColumn >= 0, targetColumn < columns else { return }
+        let targetIndex = targetRow * columns + targetColumn
+        guard targetIndex >= 0, targetIndex < entries.count else { return }
+        selectionID = entries[targetIndex].id
     }
 
     func requestSearchFocus() {
         searchFocusRequest += 1
     }
 
-    // MARK: - 动作（§28、§31、§37、§66）
+    // MARK: - 动作（§28、§31、§37、§66；需求 §9/§10/§16 两操作严格分离）
 
-    /// 复制条目到剪贴板（§28 Enter）。
-    func copyToPasteboard(_ entry: ClipboardEntry) {
-        writeToPasteboard(entry)
+    /// 操作 B：复制到系统剪贴板（⌘C，需求 §10）。不需要 Accessibility，不执行 ⌘V。
+    func copyToClipboard(_ entry: ClipboardEntry) {
+        guard writeToPasteboard(entry) else { return }
+        showFeedback(.copied, autoClearAfter: .seconds(1.5))
     }
 
-    /// Quick Paste（§37、§28 ⌘Enter）：复制 → 隐藏窗口 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
-    /// 缺少辅助功能权限时弹出引导，不静默失败。
-    func copyAndPaste(_ entry: ClipboardEntry) async {
+    /// 操作 A：粘贴到当前活动应用（Enter / ⌘Enter / 双击，需求 §9、§12、§17）。
+    /// 流程（§37）：快照原剪贴板 → 复制 → 隐藏面板 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
+    /// 缺少辅助功能权限时弹出引导，不静默失败（需求 §15）。
+    func pasteToActiveApplication(_ entry: ClipboardEntry) async {
         guard PasteService.shared.isAccessibilityTrusted else {
             showAccessibilityPrompt = true
             return
         }
-        // 先快照用户原剪贴板，粘贴完成后恢复（§37）
+        // 先快照用户原剪贴板，粘贴完成后恢复（需求 §14）
         let snapshot = PasteService.shared.captureCurrentContents()
         guard writeToPasteboard(entry) else { return }
+
+        showFeedback(.pasting, autoClearAfter: nil)
+        PasteService.shared.isBusy = true
         let pasted = await PasteService.shared.pasteToPreviousApp {
             WindowManager.shared.hideClipboardWindow()
         }
         guard pasted else {
-            errorMessage = "未能自动粘贴：无法激活之前的应用。"
+            PasteService.shared.isBusy = false
+            showFeedback(.failed("无法粘贴到当前应用"), autoClearAfter: .seconds(3))
             return
         }
-        // 给目标应用完成粘贴的时间，再恢复用户原剪贴板
+        // 给目标应用完成粘贴的时间，再恢复用户原剪贴板（需求 §14：确保读取完成后再恢复）
         try? await Task.sleep(for: .milliseconds(600))
         PasteService.shared.restore(snapshot)
+        PasteService.shared.isBusy = false
+        // 需求 §18：✓ 已粘贴到 <目标应用>
+        showFeedback(.pasted(PasteService.shared.previousAppName ?? "当前应用"), autoClearAfter: .seconds(1))
+        // 粘贴成功后面板自动消失（需求 §24）
+        try? await Task.sleep(for: .milliseconds(900))
+        WindowManager.shared.hideClipboardWindow()
     }
 
     @discardableResult
@@ -289,6 +358,7 @@ final class ClipboardViewModel {
             try await repository.delete(id: entry.id)
             entries.removeAll { $0.id == entry.id }
             fixSelection()
+            await updateCounts()
         } catch {
             setError(error)
         }
@@ -304,6 +374,19 @@ final class ClipboardViewModel {
     func openLink(_ entry: ClipboardEntry) {
         guard let urlText = entry.url ?? entry.textContent, let url = URL(string: urlText) else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - 反馈（需求 §18）
+
+    private func showFeedback(_ feedback: OperationFeedback, autoClearAfter: Duration?) {
+        feedbackResetTask?.cancel()
+        self.feedback = feedback
+        guard let autoClearAfter else { return }
+        feedbackResetTask = Task {
+            try? await Task.sleep(for: autoClearAfter)
+            guard !Task.isCancelled, self.feedback == feedback else { return }
+            self.feedback = .idle
+        }
     }
 
     private func setError(_ error: Error) {

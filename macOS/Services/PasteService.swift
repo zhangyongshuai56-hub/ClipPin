@@ -12,8 +12,14 @@ final class PasteService {
 
     private let logger = Logger(subsystem: "com.aidopaste.app", category: "paste")
 
-    /// 剪贴板窗口弹出前的前台应用（粘贴目标）。
+    /// 剪贴板窗口弹出前的前台应用（粘贴目标）。需求 §13：不能把自己当目标。
     private(set) var previousApp: NSRunningApplication?
+
+    /// Quick Paste 进行中标记：点击外部关闭的守卫（激活目标应用会触发失活）。
+    var isBusy = false
+
+    /// 粘贴目标应用名称（反馈文案「✓ 已粘贴到 Safari」用，需求 §18）。
+    var previousAppName: String? { previousApp?.localizedName }
 
     private init() {}
 

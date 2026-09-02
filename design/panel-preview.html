@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif; background: #1a1c20; }
+  .scene { width: 1400px; height: 780px; position: relative; overflow: hidden; }
+  .scene.light { background: linear-gradient(135deg, #dfe5ee 0%, #c9d4e4 40%, #e8e2d8 100%); }
+  .scene.dark  { background: linear-gradient(135deg, #17191d 0%, #20242c 45%, #14181d 100%); }
+
+  /* 桌面假窗口（衬托面板毛玻璃） */
+  .fake { position: absolute; border-radius: 10px; }
+  .fake.light { background: rgba(255,255,255,.86); box-shadow: 0 18px 50px rgba(30,40,60,.18); }
+  .fake.dark  { background: rgba(52,58,68,.92); box-shadow: 0 18px 50px rgba(0,0,0,.5); }
+  .fake .bar { height: 26px; border-radius: 10px 10px 0 0; display: flex; align-items: center; gap: 5px; padding: 0 10px; }
+  .fake.light .bar { background: rgba(0,0,0,.05); border-bottom: 1px solid rgba(0,0,0,.06); }
+  .fake.dark .bar { background: rgba(255,255,255,.05); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .sk { border-radius: 5px; }
+  .fake.light .sk { background: rgba(90,110,140,.16); }
+  .fake.dark .sk { background: rgba(255,255,255,.12); }
+
+  /* ===== 面板 ===== */
+  .panel {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    width: 1000px; height: 420px; border-radius: 16px;
+    bottom: 40px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 28px 70px rgba(10,15,30,.38), 0 4px 14px rgba(10,15,30,.22);
+  }
+  .light .panel { background: rgba(250,251,253,.78); border: 1px solid rgba(255,255,255,.65);
+    backdrop-filter: blur(34px) saturate(1.6); -webkit-backdrop-filter: blur(34px) saturate(1.6); }
+  .dark .panel { background: rgba(38,41,48,.78); border: 1px solid rgba(255,255,255,.13);
+    backdrop-filter: blur(34px) saturate(1.4); -webkit-backdrop-filter: blur(34px) saturate(1.4); }
+
+  .search { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; flex: none; }
+  .light .search { border-bottom: 1px solid rgba(0,0,0,.07); }
+  .dark .search { border-bottom: 1px solid rgba(255,255,255,.08); }
+  .search input { flex: 1; border: 0; outline: 0; background: transparent; font-size: 16px; }
+  .light .search input { color: #1d2129; }
+  .dark .search input { color: #eef1f5; }
+  .search .ph { opacity: .45; font-size: 16px; }
+  .light .search .ph { color: #555b66; } .dark .search .ph { color: #aab2bd; }
+  .gear { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; }
+  .light .gear { background: rgba(0,0,0,.05); } .dark .gear { background: rgba(255,255,255,.08); }
+
+  .tabs { display: flex; gap: 6px; padding: 8px 14px; flex: none; align-items: center; }
+  .light .tabs { border-bottom: 1px solid rgba(0,0,0,.07); }
+  .dark .tabs { border-bottom: 1px solid rgba(255,255,255,.08); }
+  .tab { display: flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 14px; font-size: 12.5px; }
+  .light .tab { color: #5a606b; } .dark .tab { color: #9aa3ae; }
+  .tab .n { font-size: 10.5px; opacity: .55; }
+  .tab.active { font-weight: 600; }
+  .light .tab.active { background: rgba(20,90,220,.12); color: #1450c8; }
+  .dark .tab.active { background: rgba(80,140,255,.2); color: #7fb0ff; }
+  .light .tab.active .n { color: #1450c8; opacity: .8; }
+  .dark .tab.active .n { color: #7fb0ff; opacity: .85; }
+
+  .grid { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px 14px; align-content: start; }
+  .card {
+    border-radius: 10px; padding: 10px 11px 8px; height: 118px;
+    display: flex; flex-direction: column; position: relative; cursor: default;
+  }
+  .light .card { background: rgba(0,0,0,.045); border: 1px solid transparent; }
+  .dark .card { background: rgba(255,255,255,.06); border: 1px solid transparent; }
+  .card.sel { border: 1.5px solid #2f6bff; }
+  .light .card.sel { background: rgba(47,107,255,.10); box-shadow: 0 6px 18px rgba(47,107,255,.22); }
+  .dark .card.sel { background: rgba(70,130,255,.16); box-shadow: 0 6px 18px rgba(47,107,255,.28); }
+  .card.sel::after {
+    content: "↩ 粘贴"; position: absolute; top: 7px; right: 7px;
+    font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 9px;
+    background: #2f6bff; color: #fff;
+  }
+  .card .head { display: flex; align-items: center; gap: 5px; font-size: 10.5px; margin-bottom: 6px; }
+  .light .card .head { color: #7a828d; } .dark .card .head { color: #8b95a1; }
+  .card .body { flex: 1; font-size: 12.5px; line-height: 1.45; overflow: hidden; }
+  .light .card .body { color: #23272e; } .dark .card .body { color: #dde3ea; }
+  .card .body .mono { font-family: "SF Mono", Menlo, monospace; font-size: 11px; }
+  .card .body .u { color: #1a63d6; } .dark .card .body .u { color: #6ea8ff; }
+  .card .meta { display: flex; align-items: center; gap: 4px; font-size: 10.5px; margin-top: 6px; }
+  .light .card .meta { color: #8b939e; } .dark .card .meta { color: #7f8894; }
+  .pin { position: absolute; bottom: 8px; right: 9px; color: #e8a013; font-size: 11px; }
+  .thumb { height: 62px; border-radius: 6px;
+    background: linear-gradient(135deg, #7fb2ff 0%, #b58cff 55%, #ff9ab0 100%); }
+  .code { background: rgba(0,0,0,.05); border-radius: 6px; padding: 7px 8px; }
+  .dark .code { background: rgba(0,0,0,.28); }
+  .code div { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; line-height: 1.55; white-space: pre; }
+  .c-k { color: #b354d8; } .c-f { color: #2f6bff; } .c-s { color: #1d9d6c; }
+  .dark .c-k { color: #cf8dff; } .dark .c-f { color: #6ea8ff; } .dark .c-s { color: #57d49b; }
+
+  .footer { height: 38px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    font-size: 11.5px; }
+  .light .footer { border-top: 1px solid rgba(0,0,0,.07); color: #6b7280; }
+  .dark .footer { border-top: 1px solid rgba(255,255,255,.08); color: #96a0ab; }
+  kbd { display: inline-block; padding: 1.5px 6px; border-radius: 5px; font-size: 10.5px; font-weight: 600;
+    font-family: inherit; margin-right: 4px; }
+  .light kbd { background: rgba(0,0,0,.07); color: #3a4048; }
+  .dark kbd { background: rgba(255,255,255,.12); color: #cfd6de; }
+  .footer .spacer { flex: 1; }
+
+  .toast {
+    position: absolute; top: 62px; right: 18px; display: flex; align-items: center; gap: 7px;
+    padding: 8px 14px; border-radius: 20px; font-size: 12.5px; font-weight: 600;
+    background: rgba(28,150,90,.92); color: #fff; box-shadow: 0 8px 22px rgba(20,120,70,.4);
+  }
+
+  .caption { position: absolute; left: 50%; transform: translateX(-50%); bottom: 10px;
+    font-size: 12px; letter-spacing: .5px; }
+  .light .caption { color: #7d8794; } .dark .caption { color: #6d7683; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ============ 浅色场景 ============ -->
+<div class="scene light">
+  <div class="fake light" style="left:60px; top:44px; width:420px; height:300px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:14px; display:grid; gap:9px;">
+      <div class="sk" style="width:60%; height:12px"></div>
+      <div class="sk" style="width:85%; height:12px"></div>
+      <div class="sk" style="width:74%; height:12px"></div>
+      <div class="sk" style="width:40%; height:12px"></div>
+      <div class="sk" style="width:70%; height:70px; border-radius:8px"></div>
+    </div>
+  </div>
+  <div class="fake light" style="right:70px; top:80px; width:360px; height:250px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:14px; display:grid; gap:9px;">
+      <div class="sk" style="width:50%; height:12px"></div>
+      <div class="sk" style="width:80%; height:12px"></div>
+      <div class="sk" style="width:66%; height:12px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#8b939e" stroke-width="1.6"/><path d="M10.5 10.5 L14.2 14.2" stroke="#8b939e" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span class="ph">搜索剪贴板…</span>
+      <div class="spacer" style="flex:1"></div>
+      <span style="font-size:10.5px; opacity:.5; margin-right:6px;">⌘F</span>
+      <div class="gear"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8b939e"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.9 4a7 7 0 00-.1-1.2l2-1.5-2-3.5-2.4 1a7 7 0 00-2-1.2L16 3H8l-.4 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.5 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.5 2.4-1a7 7 0 002 1.2L8 21h8l.4-2.6a7 7 0 002-1.2l2.4 1 2-3.5-2-1.5c.1-.4.1-.8.1-1.2z"/></svg></div>
+    </div>
+    <div class="tabs">
+      <div class="tab active"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M4 5h16v3H4zm0 5.5h16v3H4zm0 5.5h10v3H4z"/></svg>全部 <span class="n">128</span></div>
+      <div class="tab"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14 3l7 7-9.5 9.5c-.6.6-1.4 1-2.2 1L4 21l.5-5.3c0-.8.4-1.6 1-2.2L14 3z"/></svg>收藏 <span class="n">12</span></div>
+      <div class="tab"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5zm0 5v2h8v-2z"/></svg>文本 <span class="n">86</span></div>
+      <div class="tab"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3zm3 10l4-5 3 4 3-3 5 6H6z"/></svg>图片 <span class="n">24</span></div>
+      <div class="tab"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-2 2 1.5 1.5L14 4.5a3 3 0 014 4l-3 3a3 3 0 01-4 0zM14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l2-2-1.5-1.5L10 19.5a3 3 0 01-4-4l3-3a3 3 0 014 0z"/></svg>链接 <span class="n">18</span></div>
+      <div class="tab"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h6l2 2h10v3H3zm0 6h18l-2 9H5z"/></svg>文件 <span class="n">9</span></div>
+    </div>
+    <div class="grid">
+      <div class="card sel">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本 · 微信</div>
+        <div class="body">你好，这是测试内容，请查收并确认细节后回复我，<br>谢谢！</div>
+        <div class="meta">15:02</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm7.9 9h-3.4a15 15 0 00-1.2-5.2A8 8 0 0119.9 11zM12 4c.9 1.2 1.9 3.4 2.4 7H9.6C10.1 7.4 11.1 5.2 12 4zM4.1 13h3.4c.2 2 .6 3.8 1.2 5.2A8 8 0 014.1 13zm3.4-2H4.1a8 8 0 014.6-5.2A15 15 0 007.5 11zM12 20c-.9-1.2-1.9-3.4-2.4-7h4.8c-.5 3.6-1.5 5.8-2.4 7zm3.3-1.8c.6-1.4 1-3.2 1.2-5.2h3.4a8 8 0 01-4.6 5.2z"/></svg>链接 · Safari</div>
+        <div class="body mono"><span class="u">github.com</span><br><span style="opacity:.7">https://github.com/</span></div>
+        <div class="meta">14:48</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5z"/></svg>文件 · Finder</div>
+        <div class="body"><b>report.xlsx</b><br><span style="opacity:.65; font-size:11px">~/Desktop/季度报表/<br>486 KB · Excel</span></div>
+        <div class="meta">14:12</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3zm3 10l4-5 3 4 3-3 5 6H6z"/></svg>图片 · Chrome</div>
+        <div class="thumb"></div>
+        <div class="meta">800 × 600 · 3.2 MB</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 7L5 12l4.5 5 1.4-1.4L7.8 12l3.1-3.6zm5 0L19 12l-4.5 5-1.4-1.4 3.1-3.6-3.1-3.6z"/></svg>代码 · python · Xcode</div>
+        <div class="body"><div class="code"><div><span class="c-k">def</span> <span class="c-f">hello</span>():</div><div>    <span class="c-f">print</span>(<span class="c-s">"world"</span>)</div><div>    <span class="c-k">return</span> <span class="c-k">None</span></div></div></div>
+        <div class="meta">11:26</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本 · Notes</div>
+        <div class="body">会议纪要要点：确认排期、物料清单、接口联调时间…</div>
+        <div class="meta">昨天</div>
+        <div class="pin">📌</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h6l2 2h10v3H3zm0 6h18l-2 9H5z"/></svg>文件夹 · Finder</div>
+        <div class="body"><b>设计稿目录</b><br><span style="opacity:.65; font-size:11px">~/Documents/项目/<br>12 个文件</span></div>
+        <div class="meta">昨天</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本 · Slack</div>
+        <div class="body">项目排期确认：硬件测试本周四完成，软件联调下周启动，发布评审定在月底前…</div>
+        <div class="meta">昨天</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span><kbd>↩</kbd>粘贴到 Safari</span>
+      <span><kbd>⌘C</kbd>复制到剪贴板</span>
+      <span><kbd>⌘P</kbd>置顶</span>
+      <span><kbd>⌫</kbd>删除</span>
+      <span><kbd>Esc</kbd>关闭</span>
+      <div class="spacer"></div>
+      <span style="opacity:.6">128 条记录</span>
+    </div>
+  </div>
+  <div class="caption">浅色外观 · 面板默认 1000×420 · 贴近屏幕底部居中 · 可拖拽调宽高（最小 700×300）· 尺寸自动记忆</div>
+</div>
+
+<!-- ============ 深色场景：粘贴成功反馈态 ============ -->
+<div class="scene dark">
+  <div class="fake dark" style="left:90px; top:50px; width:430px; height:280px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:14px; display:grid; gap:9px;">
+      <div class="sk" style="width:55%; height:12px"></div>
+      <div class="sk" style="width:82%; height:12px"></div>
+      <div class="sk" style="width:70%; height:12px"></div>
+      <div class="sk" style="width:45%; height:12px"></div>
+    </div>
+  </div>
+  <div class="fake dark" style="right:80px; top:70px; width:350px; height:240px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:14px; display:grid; gap:9px;">
+      <div class="sk" style="width:48%; height:12px"></div>
+      <div class="sk" style="width:78%; height:12px"></div>
+      <div class="sk" style="width:62%; height:12px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="toast">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>
+      已粘贴到 Safari
+    </div>
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#8b939e" stroke-width="1.6"/><path d="M10.5 10.5 L14.2 14.2" stroke="#8b939e" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span class="ph">搜索剪贴板…</span>
+      <div class="spacer" style="flex:1"></div>
+      <span style="font-size:10.5px; opacity:.5; margin-right:6px;">⌘F</span>
+      <div class="gear"><svg width="13" height="13" viewBox="0 0 24 24" fill="#8b939e"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.9 4a7 7 0 00-.1-1.2l2-1.5-2-3.5-2.4 1a7 7 0 00-2-1.2L16 3H8l-.4 2.6a7 7 0 00-2 1.2l-2.4-1-2 3.5 2 1.5a7 7 0 000 2.4l-2 1.5 2 3.5 2.4-1a7 7 0 002 1.2L8 21h8l.4-2.6a7 7 0 002-1.2l2.4 1 2-3.5-2-1.5c.1-.4.1-.8.1-1.2z"/></svg></div>
+    </div>
+    <div class="tabs">
+      <div class="tab active">全部 <span class="n">128</span></div>
+      <div class="tab">收藏 <span class="n">12</span></div>
+      <div class="tab">文本 <span class="n">86</span></div>
+      <div class="tab">图片 <span class="n">24</span></div>
+      <div class="tab">链接 <span class="n">18</span></div>
+      <div class="tab">文件 <span class="n">9</span></div>
+    </div>
+    <div class="grid">
+      <div class="card sel">
+        <div class="head">文本 · 微信</div>
+        <div class="body">你好，这是测试内容，请查收并确认细节后回复我，谢谢！</div>
+        <div class="meta">15:02</div>
+      </div>
+      <div class="card">
+        <div class="head">链接 · Safari</div>
+        <div class="body mono"><span class="u">github.com</span><br><span style="opacity:.7">https://github.com/</span></div>
+        <div class="meta">14:48</div>
+      </div>
+      <div class="card">
+        <div class="head">文件 · Finder</div>
+        <div class="body"><b>report.xlsx</b><br><span style="opacity:.65; font-size:11px">~/Desktop/季度报表/</span></div>
+        <div class="meta">14:12</div>
+      </div>
+      <div class="card">
+        <div class="head">图片 · Chrome</div>
+        <div class="thumb"></div>
+        <div class="meta">800 × 600 · 3.2 MB</div>
+      </div>
+      <div class="card">
+        <div class="head">代码 · python</div>
+        <div class="body"><div class="code"><div><span class="c-k">def</span> <span class="c-f">hello</span>():</div><div>    <span class="c-f">print</span>(<span class="c-s">"world"</span>)</div></div></div>
+        <div class="meta">11:26</div>
+      </div>
+      <div class="card">
+        <div class="head">文本 · Notes</div>
+        <div class="body">会议纪要要点：确认排期、物料清单、接口联调时间…</div>
+        <div class="meta">昨天</div>
+        <div class="pin">📌</div>
+      </div>
+      <div class="card">
+        <div class="head">文件夹 · Finder</div>
+        <div class="body"><b>设计稿目录</b><br><span style="opacity:.65; font-size:11px">~/Documents/项目/</span></div>
+        <div class="meta">昨天</div>
+      </div>
+      <div class="card">
+        <div class="head">文本 · Slack</div>
+        <div class="body">项目排期确认：硬件测试本周四完成，软件联调下周启动…</div>
+        <div class="meta">昨天</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span><kbd>↩</kbd>粘贴到 Safari</span>
+      <span><kbd>⌘C</kbd>复制到剪贴板</span>
+      <span><kbd>⌘P</kbd>置顶</span>
+      <span><kbd>⌫</kbd>删除</span>
+      <span><kbd>Esc</kbd>关闭</span>
+      <div class="spacer"></div>
+      <span style="opacity:.6">粘贴后自动恢复原剪贴板</span>
+    </div>
+  </div>
+  <div class="caption">深色外观 · Enter 粘贴成功后的反馈态（面板 1s 后自动消失，原剪贴板已还原）</div>
+</div>
+
+</body>
+</html>
