@@ -146,34 +146,8 @@ impl Database {
     /// 仅刷新 updated_at 并更新来源，保留 created_at 与 Pin 状态。
     pub fn create_item(&self, new_item: NewClipboardItem) -> Result<ClipboardItem> {
         new_item.validate()?;
-        // 图片载荷强制按 Image 处理；哈希基于图片字节而非路径（§17）
-        let (item_type, metadata) = if new_item.image_source_path.is_some() {
-            (ItemType::Image, new_item.metadata.clone())
-        } else {
-            refine_type_and_metadata(&new_item)
-        };
-        // 标题 / 预览必须按细分后的类型推导（例如文本形式的 URL 要取域名做标题）
-        let mut effective = new_item.clone();
-        effective.item_type = item_type;
-        // 文本载荷被识别为 URL 时，把内容规范化到 url 字段（text_content 保留，供搜索）
-        if item_type == ItemType::Url && effective.url.is_none() {
-            effective.url = effective
-                .text_content
-                .as_deref()
-                .map(str::trim)
-                .map(str::to_string);
-        }
-        // 哈希与大小：图片读字节（§16 临时文件 → Core 转存）；其余按文本内容
-        let (content_hash, content_size) =
-            if let Some(source) = new_item.image_source_path.as_deref() {
-                let bytes = fs::read(source)?;
-                (dedup::sha256_hex(&bytes), bytes.len() as i64)
-            } else {
-                (
-                    dedup::hash_for_new_item(&new_item)?,
-                    effective.content_size(),
-                )
-            };
+        let resolved = resolve_new_item(&new_item)?;
+        let effective = &resolved.effective;
         let now = now_ms();
         let created_at = new_item.created_at.unwrap_or(now);
         let title = new_item.title.clone().or_else(|| effective.derive_title());
@@ -184,7 +158,7 @@ impl Database {
         let existing: Option<i64> = tx
             .query_row(
                 "SELECT id FROM clipboard_items WHERE content_hash = ?1",
-                params![content_hash],
+                params![resolved.content_hash],
                 |row| row.get(0),
             )
             .optional()?;
@@ -202,9 +176,11 @@ impl Database {
             }
             None => {
                 // 新图片：先转存文件拿到路径，再入库；转存失败则整体失败，不落脏行
-                let (image_path, thumbnail_path) = match new_item.image_source_path.as_deref() {
+                let (image_path, thumbnail_path) = match effective.image_source_path.as_deref() {
                     Some(source) => {
-                        let stored = self.image_store.store(Path::new(source), &content_hash)?;
+                        let stored = self
+                            .image_store
+                            .store(Path::new(source), &resolved.content_hash)?;
                         (Some(stored.image_path), stored.thumbnail_path)
                     }
                     None => (None, None),
@@ -216,22 +192,22 @@ impl Database {
                          content_size, uti, content_hash, is_pinned, metadata)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ?16)",
                     params![
-                        item_type.as_str(),
+                        effective.item_type.as_str(),
                         created_at,
                         now,
                         title,
                         preview,
-                        new_item.text_content,
-                        new_item.url,
-                        new_item.file_path,
+                        effective.text_content,
+                        effective.url,
+                        effective.file_path,
                         image_path,
                         thumbnail_path,
-                        new_item.source_app,
-                        new_item.source_app_name,
-                        content_size,
-                        new_item.uti,
-                        content_hash,
-                        metadata,
+                        effective.source_app,
+                        effective.source_app_name,
+                        resolved.content_size,
+                        effective.uti,
+                        resolved.content_hash,
+                        effective.metadata,
                     ],
                 )?;
                 tx.last_insert_rowid()
@@ -239,7 +215,7 @@ impl Database {
         };
         tx.commit()?;
         // §84：日志只允许 type / size / id 等元信息，禁止内容原文
-        log::info!(target: "aidopaste", "item captured id={id} type={} size={content_size}", item_type.as_str());
+        log::info!(target: "aidopaste", "item captured id={id} type={} size={}", effective.item_type.as_str(), resolved.content_size);
         drop(conn);
         self.get_item(id)
     }
@@ -489,6 +465,91 @@ fn fetch_artifacts_where(
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(AidoPasteError::from)
+}
+
+/// 解析后的条目：类型修正 / metadata 合并 / 内容哈希 / 大小（§16-§21）。
+struct ResolvedNewItem {
+    effective: NewClipboardItem,
+    content_hash: String,
+    content_size: i64,
+}
+
+/// 按载荷类别解析：
+/// 1. 图片（§16、§20）：哈希基于图片字节，强制 Image 类型；
+/// 2. 文件 / 文件夹（§21、§60）：只读元数据不复制本体，类型按实际文件性质判定，
+///    哈希 = 规范路径 + 大小 + mtime（文件内容变更后再复制会产生新条目）；
+/// 3. 文本（§19）：走规则分类器细分，URL 规范化。
+fn resolve_new_item(item: &NewClipboardItem) -> Result<ResolvedNewItem> {
+    let mut effective = item.clone();
+
+    if let Some(source) = item.image_source_path.as_deref() {
+        effective.item_type = ItemType::Image;
+        let bytes = fs::read(source)?;
+        return Ok(ResolvedNewItem {
+            effective,
+            content_hash: dedup::sha256_hex(&bytes),
+            content_size: bytes.len() as i64,
+        });
+    }
+
+    if matches!(item.item_type, ItemType::File | ItemType::Folder)
+        && let Some(path) = item.file_path.as_deref()
+    {
+        let metadata = fs::metadata(path)?;
+        let is_dir = metadata.is_dir();
+        let size = if is_dir { 0 } else { metadata.len() as i64 };
+        let mtime_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        let canonical = fs::canonicalize(path)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_string());
+        effective.item_type = if is_dir {
+            ItemType::Folder
+        } else {
+            ItemType::File
+        };
+        effective.metadata = with_metadata_flag(item.metadata.as_deref(), "isDirectory", is_dir);
+        let hash_source = format!("file\0{canonical}\0{size}\0{mtime_ms}");
+        return Ok(ResolvedNewItem {
+            effective,
+            content_hash: dedup::sha256_hex(hash_source.as_bytes()),
+            content_size: size,
+        });
+    }
+
+    let (item_type, metadata) = refine_type_and_metadata(item);
+    effective.item_type = item_type;
+    effective.metadata = metadata;
+    // 文本载荷被识别为 URL 时，把内容规范化到 url 字段（text_content 保留，供搜索）
+    if item_type == ItemType::Url && effective.url.is_none() {
+        effective.url = effective
+            .text_content
+            .as_deref()
+            .map(str::trim)
+            .map(str::to_string);
+    }
+    let content_size = effective.content_size();
+    Ok(ResolvedNewItem {
+        effective,
+        content_hash: dedup::hash_for_new_item(item)?,
+        content_size,
+    })
+}
+
+/// 在 metadata JSON 中写入布尔标志（原 metadata 非法时重建对象）。
+fn with_metadata_flag(metadata: Option<&str>, key: &str, value: bool) -> Option<String> {
+    use serde_json::Value;
+    let mut json = metadata
+        .and_then(|m| serde_json::from_str::<Value>(m).ok())
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    if let Value::Object(ref mut map) = json {
+        map.insert(key.into(), Value::Bool(value));
+    }
+    Some(json.to_string())
 }
 
 /// Text 类型走规则分类器细分（§19）；检测到代码语言时写入 `metadata.language`。

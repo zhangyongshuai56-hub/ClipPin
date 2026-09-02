@@ -9,14 +9,23 @@ enum ClipboardReader {
         let pasteboard = NSPasteboard.general
         guard let types = pasteboard.types, !types.isEmpty else { return nil }
 
-        // 文本优先（含 URL 字符串；类型细分由 Rust 分类器完成）
-        if types.contains(.string), let payload = readText(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName) {
+        // 文件 / 文件夹（Phase 8）最先判定：Finder 复制文件时会同时携带
+        // file-url、TIFF 图标与路径文本，必须优先命中，避免误存为图片或文本。
+        if types.contains(.fileURL),
+           let payload = readFileURLs(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName)
+        {
             return payload
         }
 
-        // 图片（Phase 7）：PNG / TIFF。
-        // Finder 复制文件时也会带 TIFF（文件图标），必须排除，留待 Phase 8 文件支持处理。
-        if !types.contains(.fileURL), let payload = readImage(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName) {
+        // 文本（含 URL 字符串；类型细分由 Rust 分类器完成）
+        if types.contains(.string),
+           let payload = readText(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName)
+        {
+            return payload
+        }
+
+        // 图片（Phase 7）：PNG / TIFF
+        if let payload = readImage(pasteboard, sourceApp: sourceApp, sourceAppName: sourceAppName) {
             return payload
         }
 
@@ -62,6 +71,37 @@ enum ClipboardReader {
         return ClipboardPayload(
             content: .image(tempFileURL: tempURL),
             uti: pngData != nil ? "public.png" : "public.tiff",
+            sourceApp: sourceApp,
+            sourceAppName: sourceAppName,
+            capturedAt: Date()
+        )
+    }
+
+    /// §21、§60：只读取 File URL 引用与类型信息，绝不复制文件本体。
+    private static func readFileURLs(
+        _ pasteboard: NSPasteboard,
+        sourceApp: String?,
+        sourceAppName: String?
+    ) -> ClipboardPayload? {
+        guard
+            let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL],
+            !urls.isEmpty
+        else { return nil }
+
+        let items: [FileItem] = urls.map { url in
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey])
+            return FileItem(
+                url: url,
+                isDirectory: values?.isDirectory ?? false,
+                uti: values?.contentType?.identifier
+            )
+        }
+        return ClipboardPayload(
+            content: .files(items),
+            uti: nil,
             sourceApp: sourceApp,
             sourceAppName: sourceAppName,
             capturedAt: Date()

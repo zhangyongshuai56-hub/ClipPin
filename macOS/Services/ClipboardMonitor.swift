@@ -92,13 +92,22 @@ final class ClipboardMonitor {
             let payload = ClipboardReader.read(sourceApp: sourceBundleID, sourceAppName: sourceName)
             if let payload {
                 if payload.isWithinSizeLimit {
-                    do {
-                        let entry = try await repository.create(payload.toNewItem())
+                    // 文件载荷一文件一条；其余载荷单条
+                    var lastID: Int64?
+                    var savedCount = 0
+                    for entry in payload.toNewItems() {
+                        do {
+                            let saved = try await repository.create(entry)
+                            lastID = saved.id
+                            savedCount += 1
+                        } catch {
+                            // 库层错误已带上下文；这里保证捕获失败不影响监听循环
+                            await self.captureDidFail(error)
+                        }
+                    }
+                    if savedCount > 0 {
                         // §84：日志只记录 id / 大小，不记录内容原文
-                        await self.captureDidSave(id: entry.id, byteSize: payload.byteSize)
-                    } catch {
-                        // 库层错误已带上下文；这里保证捕获失败不影响监听循环
-                        await self.captureDidFail(error)
+                        await self.captureDidSave(id: lastID ?? 0, byteSize: payload.byteSize)
                     }
                 } else {
                     // §51：超限内容直接跳过

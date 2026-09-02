@@ -409,3 +409,71 @@ fn batch_delete_removes_image_artifacts() {
     assert!(!std::path::Path::new(&a.image_path.unwrap()).exists());
     assert!(!std::path::Path::new(&b.thumbnail_path.unwrap()).exists());
 }
+
+// MARK: - 文件 / 文件夹（Phase 8）
+
+fn file_item(path: &std::path::Path) -> NewClipboardItem {
+    NewClipboardItem {
+        item_type: ItemType::File,
+        file_path: Some(path.to_string_lossy().into_owned()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn file_items_capture_metadata_without_copying_content() {
+    let db = Database::open_in_memory().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("report.xlsx");
+    std::fs::write(&path, b"fake workbook bytes").unwrap();
+    let expected_size = std::fs::metadata(&path).unwrap().len() as i64;
+
+    let item = db.create_item(file_item(&path)).unwrap();
+    assert_eq!(item.item_type, ItemType::File);
+    assert_eq!(item.title.as_deref(), Some("report.xlsx"));
+    assert_eq!(item.content_size, expected_size);
+    // §21：不复制文件本体，无图片产物
+    assert!(item.image_path.is_none());
+    let metadata = item.metadata.as_deref().unwrap_or_default();
+    assert!(metadata.contains("isDirectory"), "metadata={metadata}");
+    assert!(!metadata.contains("true"));
+
+    // 同一文件再次复制 → 去重 touch
+    let again = db.create_item(file_item(&path)).unwrap();
+    assert_eq!(item.id, again.id);
+    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 1);
+
+    // 文件内容变更（大小变化）后再复制 → 新条目
+    std::fs::write(&path, b"changed content with different size").unwrap();
+    let changed = db.create_item(file_item(&path)).unwrap();
+    assert_ne!(item.id, changed.id);
+    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 2);
+}
+
+#[test]
+fn folder_items_are_detected_from_actual_filesystem() {
+    let db = Database::open_in_memory().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // Swift 侧即便误传 File 类型，Core 也按真实文件系统纠正为 Folder
+    let item = db.create_item(file_item(dir.path())).unwrap();
+    assert_eq!(item.item_type, ItemType::Folder);
+    let metadata = item.metadata.as_deref().unwrap_or_default();
+    assert!(
+        metadata.contains("\"isDirectory\":true"),
+        "metadata={metadata}"
+    );
+    assert_eq!(item.content_size, 0);
+    assert!(item.title.as_deref().map(str::len).unwrap_or(0) > 0);
+}
+
+#[test]
+fn missing_files_fail_without_creating_rows() {
+    let db = Database::open_in_memory().unwrap();
+    let missing = std::path::Path::new("/tmp/aidopaste-nonexistent-file-xyz");
+    let result = db.create_item(file_item(missing));
+    assert!(matches!(
+        result,
+        Err(aidopaste_core::AidoPasteError::FileSystem(_))
+    ));
+    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 0);
+}
