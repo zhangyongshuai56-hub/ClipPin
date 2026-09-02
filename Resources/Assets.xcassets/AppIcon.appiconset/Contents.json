@@ -1,40 +1,5 @@
 {
   "images" : [
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "16x16"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "32x32"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "64x64"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "128x128"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "256x256"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "512x512"
-    },
-    {
-      "idiom" : "universal",
-      "platform" : "macos",
-      "size" : "1024x1024"
-    }
   ],
   "info" : {
     "author" : "xcode",

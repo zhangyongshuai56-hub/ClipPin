@@ -19,11 +19,12 @@ xcodebuild -scheme AidoPaste -configuration Debug -derivedDataPath .build/Derive
 
 产品输出：`.build/DerivedData/Build/Products/Debug/AidoPaste.app`
 
-## Rust Core
+Rust Core 会在 Xcode 构建时由 `Scripts/build-rust-core.sh` 自动编译并生成 Swift 绑定，
+也可手动执行：
 
 ```bash
-cd rust-core
-cargo test                          # 单元测试 + 集成测试
+Scripts/build-rust-core.sh Debug    # 或 Release
+cd rust-core && cargo test          # Rust 单元测试 + 集成测试
 cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
@@ -46,4 +47,15 @@ Phase 2 已完成（`rust-core/`，独立 crate `aidopaste-core`）：
 - 搜索：≥3 字符走 FTS5，短查询回退 LIKE；类型过滤 + 分页
 - CRUD / Pin / 批量删除 / 过期清理（1/7/30/90 天/永不）/ 历史条数上限 / 统计
 - 38 个单元 + 集成测试全绿；clippy 零警告；rustfmt 通过
+
+Phase 3 已完成（UniFFI 桥接）：
+
+- Rust 侧 `api/ffi.rs`：`AidoPasteDatabase` 对象 + Record/Enum/Error 全量导出（uniffi 0.32，proc-macro 模式）
+- Xcode 集成：`Build Rust Core` script phase（cargo 构建 + uniffi-bindgen 生成绑定），
+  静态库链接（`-laidopaste_core`），FFI 头文件经 `SWIFT_INCLUDE_PATHS` 提供
+- Swift 侧分层：`RustCoreBridge`（领域模型 + UserFacingError 映射）→
+  `ClipboardRepository`（actor，全量 Core API）→ `CoreStore`（应用启动初始化）
+- 数据库位置：`~/Library/Application Support/AidoPaste/Database/clipboard.db`（WAL）
+- 端到端验证：应用启动即创建数据库，日志输出 `rust core ready schema=1`
+- 41 个 Rust 测试全绿（含 3 个 FFI 边界测试）
 

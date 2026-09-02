@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement 兜底：确保应用以菜单栏常驻方式运行，不占用 Dock
         NSApp.setActivationPolicy(.accessory)
+        Task { await CoreStore.shared.bootstrap() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
