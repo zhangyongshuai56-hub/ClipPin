@@ -19,6 +19,15 @@ xcodebuild -scheme AidoPaste -configuration Debug -derivedDataPath .build/Derive
 
 产品输出：`.build/DerivedData/Build/Products/Debug/AidoPaste.app`
 
+## Rust Core
+
+```bash
+cd rust-core
+cargo test                          # 单元测试 + 集成测试
+cargo clippy --all-targets -- -D warnings
+cargo fmt
+```
+
 ## 当前状态
 
 Phase 1 已完成：
@@ -28,3 +37,13 @@ Phase 1 已完成：
 - 基础剪贴板窗口（900×650，含空状态占位）
 - 设置窗口：登录启动（SMAppService）、主题（跟随系统 / 浅色 / 深色）、关于
 - 明暗色使用系统语义颜色
+
+Phase 2 已完成（`rust-core/`，独立 crate `aidopaste-core`）：
+
+- `ClipboardItem` 数据模型 + 规则分类器（URL / JSON / Swift / Python / JS / SQL / Shell）
+- SHA-256 content_hash 去重：重复复制只刷新时间与来源，保留 Pin
+- SQLite（WAL + busy_timeout）：`user_version` 迁移框架、FTS5 trigram 全文索引（中英文子串）
+- 搜索：≥3 字符走 FTS5，短查询回退 LIKE；类型过滤 + 分页
+- CRUD / Pin / 批量删除 / 过期清理（1/7/30/90 天/永不）/ 历史条数上限 / 统计
+- 38 个单元 + 集成测试全绿；clippy 零警告；rustfmt 通过
+

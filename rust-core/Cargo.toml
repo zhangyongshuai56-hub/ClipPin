@@ -1,0 +1,16 @@
+[package]
+name = "aidopaste-core"
+version = "0.1.0"
+edition = "2024"
+description = "AidoPaste Rust core: clipboard data model, dedup, SQLite storage, search, cleanup"
+publish = false
+
+[dependencies]
+log = "0.4.34"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+thiserror = "2.0.20"
+
+[dev-dependencies]
+tempfile = "3.27.0"
