@@ -21,7 +21,7 @@ GEN_DIR="$SRCROOT/macOS/Bridge/Generated"
 RUST_DIR="$SRCROOT/rust-core"
 
 cd "$RUST_DIR"
-cargo build
+cargo build --profile "$PROFILE"
 
 # 生成绑定（幂等）：Swift 文件进源码树（fileSystemSynchronizedGroups 自动纳入编译），
 # 头文件与 modulemap 拷贝到 OUT_DIR 供 SWIFT_INCLUDE_PATHS 查找
