@@ -17,6 +17,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
     private static let panelSizeKey = "panelSize"
     /// 面板显示时刻：用于「点击外部关闭」的防误关宽限期。
     private var shownAt = Date.distantPast
+    /// 面板是否真正获得过键盘焦点（激活失败时不启用「点击外部关闭」）。
+    private var panelHadKeyFocus = false
     private var resignObserver: NSObjectProtocol?
 
     /// 显示剪贴板面板（需求 §1、§7）：出现在鼠标所在屏幕底部居中，聚焦搜索框。
@@ -33,6 +35,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         positionAtBottomCenter(window)
 
         shownAt = Date()
+        panelHadKeyFocus = false
         // §64：呼出淡入（100~250ms 内）
         window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
@@ -42,6 +45,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
+        panelHadKeyFocus = window.isKeyWindow
         // 需求 §7：呼出后搜索框默认聚焦，可直接输入
         if focusSearch, let viewModel {
             viewModel.requestSearchFocus()
@@ -126,6 +130,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
                 guard Date().timeIntervalSince(self.shownAt) > 0.6 else { return }
                 // Quick Paste 进行中不关（激活目标应用会触发失活）
                 guard !PasteService.shared.isBusy else { return }
+                // 呼出时未获得焦点（如系统拒绝后台激活）→ 失活不关，面板仍可点击使用
+                guard self.panelHadKeyFocus else { return }
                 self.hideClipboardWindow()
             }
         }

@@ -114,8 +114,10 @@ struct ClipboardView: View {
     }
 
     /// 卡片宽约 226pt（+10 间距），列数随面板宽度自适应（需求 §3 可调宽）。
+    /// 列数不变时不写 @Observable 属性，避免拖拽调宽时每帧触发全网格重排（卡顿根因）。
     private func applyGridColumns(width: CGFloat) {
         let columns = max(1, Int((width - 28 + 10) / 236))
+        guard columns != gridColumns else { return }
         gridColumns = columns
         viewModel.gridColumns = columns
     }

@@ -42,17 +42,29 @@ final class ClipboardWindow: NSPanel {
         let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: contentSize))
         effect.material = .underWindowBackground
         effect.blendingMode = .behindWindow
-        effect.state = .active
+        // followsWindowActiveState：非激活时降低模糊重绘成本（resize 卡顿优化）
+        effect.state = .followsWindowActiveState
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 16
         effect.layer?.masksToBounds = true
-        effect.autoresizingMask = [.width, .height]
 
+        // 用 AutoLayout 把内容钉在材质视图四边：窗口任何尺寸变化下都不会漂移
+        // （autoresizing 在 fullSizeContentView + 安全区变化时会出现内容高度漂移，
+        //  导致底部提示条被裁剪）
         let hostingView = NSHostingView(rootView: rootView)
-        hostingView.autoresizingMask = [.width, .height]
-        hostingView.frame = effect.bounds
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(hostingView)
-        self.contentView = effect
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: effect.topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
+        ])
+
+        // contentViewController 让 AppKit 全程接管视图尺寸与安全区布局
+        let controller = NSViewController()
+        controller.view = effect
+        self.contentViewController = controller
         self.center()
     }
 }
