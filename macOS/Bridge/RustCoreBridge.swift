@@ -120,6 +120,7 @@ extension ClipboardEntry {
         item.textContent = textContent
         item.url = url
         item.filePath = filePath
+        item.imageSourcePath = nil
         item.uti = uti
         item.createdAt = createdAt
         item.metadata = metadata
@@ -161,6 +162,8 @@ struct NewClipboardEntry: Sendable {
     var textContent: String?
     var url: String?
     var filePath: String?
+    /// 图片暂存文件路径（§16：Core 按内容哈希转存后由调用方清理临时文件）。
+    var imageSourcePath: String?
     var uti: String?
     var sourceApp: String?
     var sourceAppName: String?
@@ -175,6 +178,7 @@ struct NewClipboardEntry: Sendable {
             textContent: textContent,
             url: url,
             filePath: filePath,
+            imageSourcePath: imageSourcePath,
             uti: uti,
             sourceApp: sourceApp,
             sourceAppName: sourceAppName,

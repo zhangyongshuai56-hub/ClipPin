@@ -104,6 +104,8 @@ final class ClipboardMonitor {
                     // §51：超限内容直接跳过
                     await self.captureSkippedAsTooLarge(byteSize: payload.byteSize)
                 }
+                // §16：图片临时文件在 Core 转存（或跳过）后由 Swift 清理
+                payload.cleanupTemporaryFiles()
             }
             await self.captureDidFinish()
         }

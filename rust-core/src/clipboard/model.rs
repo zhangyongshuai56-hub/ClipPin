@@ -82,6 +82,9 @@ pub struct NewClipboardItem {
     pub text_content: Option<String>,
     pub url: Option<String>,
     pub file_path: Option<String>,
+    /// 图片暂存文件路径（§16：Swift 落临时文件，Core 读取并转存，避免大块二进制跨 FFI 复制）。
+    /// Core 读取后按内容哈希转存，临时文件由 Swift 侧清理。
+    pub image_source_path: Option<String>,
     pub uti: Option<String>,
     pub source_app: Option<String>,
     pub source_app_name: Option<String>,
@@ -133,9 +136,9 @@ impl NewClipboardItem {
 
     /// 基础校验：至少要有一种可保存的内容。
     pub fn validate(&self) -> Result<()> {
-        if self.content().is_none() {
+        if self.content().is_none() && self.image_source_path.is_none() {
             return Err(AidoPasteError::InvalidInput(
-                "clipboard item requires non-empty text, url or file_path".into(),
+                "clipboard item requires non-empty text, url, file_path or image".into(),
             ));
         }
         Ok(())

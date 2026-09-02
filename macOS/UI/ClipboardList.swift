@@ -107,12 +107,37 @@ struct ClipboardList: View {
             .contentShape(Rectangle())
             .onTapGesture { viewModel.selectionID = entry.id }
             .contextMenu { contextMenu(for: entry) }
+            // §36：拖拽导出 —— 图片/文件/文本/链接以系统标准形式交给目标 App
+            .onDrag { dragProvider(for: entry) }
             .onAppear {
                 // 滚动到最后一条时加载下一页（§58）
                 if entry.id == viewModel.entries.last?.id {
                     Task { await viewModel.loadNextPageIfNeeded() }
                 }
             }
+    }
+
+    /// 拖拽数据源（§36、§60）：文件给 File URL、图片给图像对象、文本给字符串，不做整文件复制。
+    private func dragProvider(for entry: ClipboardEntry) -> NSItemProvider {
+        switch entry.itemType {
+        case .image:
+            if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
+                return NSItemProvider(object: image)
+            }
+        case .file, .folder:
+            if let path = entry.filePath {
+                return NSItemProvider(object: NSURL(fileURLWithPath: path))
+            }
+        case .url:
+            if let urlText = entry.url, let url = URL(string: urlText) {
+                return NSItemProvider(object: url as NSURL)
+            }
+        default:
+            if let text = entry.textContent ?? entry.preview {
+                return NSItemProvider(object: text as NSString)
+            }
+        }
+        return NSItemProvider()
     }
 
     /// 右键菜单（§66）。「复制并粘贴」在 Phase 10（Accessibility）接入。

@@ -1,3 +1,4 @@
-//! SQLite 存储层。文件 / 图片存储在 Phase 7、8 按需加入（image_store / file_store）。
+//! SQLite 存储层。file_store 在 Phase 8 按需加入。
 
 pub mod database;
+pub mod image_store;

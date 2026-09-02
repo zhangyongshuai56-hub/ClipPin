@@ -29,21 +29,27 @@ struct ClipboardPreview: View {
         return title
     }
 
-    // MARK: - 内容（§35）
+    // MARK: - 内容（§35、§59）
 
     private var contentText: String {
-        if entry.itemType == .image { return "（图片，Phase 7 提供预览）" }
-        return entry.textContent ?? entry.url ?? entry.filePath ?? ""
+        entry.textContent ?? entry.url ?? entry.filePath ?? ""
     }
 
+    @ViewBuilder
     private var contentSection: some View {
-        Text(contentText)
-            .font(.system(size: 12, design: entry.itemType == .code ? .monospaced : .default))
-            .textSelection(.enabled)
-            .lineLimit(16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .padding(8)
-            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        if entry.itemType == .image {
+            // 详情展示较大缩略图；复制时写回原图
+            ThumbnailImage(path: entry.thumbnailPath ?? entry.imagePath, side: 232)
+                .frame(maxWidth: .infinity)
+        } else {
+            Text(contentText)
+                .font(.system(size: 12, design: entry.itemType == .code ? .monospaced : .default))
+                .textSelection(.enabled)
+                .lineLimit(16)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                .padding(8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
     }
 
     // MARK: - 元信息（§35）

@@ -222,8 +222,12 @@ final class ClipboardViewModel {
                 success = false
             }
         case .image:
-            // Phase 7 实现图片写回
-            success = false
+            // 写回图片（TIFF 形式），可粘贴到任何接受图片的应用
+            if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
+                success = pasteboard.writeObjects([image])
+            } else {
+                success = false
+            }
         }
         guard success else {
             errorMessage = "该内容暂不支持复制。"

@@ -1064,6 +1064,10 @@ public struct NewClipboardItem: Equatable, Hashable {
     public var textContent: String?
     public var url: String?
     public var filePath: String?
+    /**
+     * 图片暂存文件路径（§16：Swift 落临时文件，Core 读取转存）。
+     */
+    public var imageSourcePath: String?
     public var uti: String?
     public var sourceApp: String?
     public var sourceAppName: String?
@@ -1076,7 +1080,10 @@ public struct NewClipboardItem: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(itemType: ItemType, textContent: String?, url: String?, filePath: String?, uti: String?, sourceApp: String?, sourceAppName: String?, title: String?, metadata: String?, 
+    public init(itemType: ItemType, textContent: String?, url: String?, filePath: String?, 
+        /**
+         * 图片暂存文件路径（§16：Swift 落临时文件，Core 读取转存）。
+         */imageSourcePath: String?, uti: String?, sourceApp: String?, sourceAppName: String?, title: String?, metadata: String?, 
         /**
          * 捕获时间（毫秒）；None 表示使用当前时间。
          */createdAt: Int64?) {
@@ -1084,6 +1091,7 @@ public struct NewClipboardItem: Equatable, Hashable {
         self.textContent = textContent
         self.url = url
         self.filePath = filePath
+        self.imageSourcePath = imageSourcePath
         self.uti = uti
         self.sourceApp = sourceApp
         self.sourceAppName = sourceAppName
@@ -1112,6 +1120,7 @@ public struct FfiConverterTypeNewClipboardItem: FfiConverterRustBuffer {
                 textContent: FfiConverterOptionString.read(from: &buf), 
                 url: FfiConverterOptionString.read(from: &buf), 
                 filePath: FfiConverterOptionString.read(from: &buf), 
+                imageSourcePath: FfiConverterOptionString.read(from: &buf), 
                 uti: FfiConverterOptionString.read(from: &buf), 
                 sourceApp: FfiConverterOptionString.read(from: &buf), 
                 sourceAppName: FfiConverterOptionString.read(from: &buf), 
@@ -1126,6 +1135,7 @@ public struct FfiConverterTypeNewClipboardItem: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.textContent, into: &buf)
         FfiConverterOptionString.write(value.url, into: &buf)
         FfiConverterOptionString.write(value.filePath, into: &buf)
+        FfiConverterOptionString.write(value.imageSourcePath, into: &buf)
         FfiConverterOptionString.write(value.uti, into: &buf)
         FfiConverterOptionString.write(value.sourceApp, into: &buf)
         FfiConverterOptionString.write(value.sourceAppName, into: &buf)

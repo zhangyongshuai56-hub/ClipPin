@@ -3,7 +3,8 @@
 //! 所有访问经由单一连接串行化；WAL + busy_timeout 保证崩溃恢复与并发写入安全。
 //! schema 通过 `PRAGMA user_version` 迁移框架演进，只追加迁移、不改历史（§47）。
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::types::Value;
@@ -14,6 +15,10 @@ use crate::clipboard::classifier;
 use crate::clipboard::dedup;
 use crate::clipboard::model::{ClipboardItem, ItemType, NewClipboardItem, Statistics, now_ms};
 use crate::error::{AidoPasteError, Result};
+use crate::storage::image_store::ImageStore;
+
+/// 条目图片产物路径（删除条目时同步清理文件，§32）。
+type Artifacts = (Option<String>, Option<String>);
 
 /// 单次查询返回的最大条数，防御一次性加载过多数据（§57）。
 const MAX_PAGE_SIZE: usize = 1000;
@@ -83,22 +88,34 @@ const MIGRATIONS: &[&str] = &[
 #[derive(Clone)]
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
+    image_store: ImageStore,
 }
 
 impl Database {
     /// 打开（或创建）数据库文件。
+    /// 存储根目录默认取数据库文件的祖父目录（§20：
+    /// `.../AidoPaste/Database/clipboard.db` → `.../AidoPaste`）。
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        Self::initialize(conn)
+        let path = path.as_ref();
+        let storage_root = derive_storage_root(path);
+        Self::open_with_layout(path, &storage_root)
     }
 
-    /// 内存数据库，供测试与临时场景。
+    /// 打开数据库并显式指定存储根目录（Images / Thumbnails 的父目录）。
+    pub fn open_with_layout(path: &Path, storage_root: &Path) -> Result<Self> {
+        let conn = Connection::open(path)?;
+        Self::initialize(conn, ImageStore::open(storage_root)?)
+    }
+
+    /// 内存数据库，供测试与临时场景。图片产物落在临时目录。
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        Self::initialize(conn)
+        let storage_root =
+            std::env::temp_dir().join(format!("aidopaste-images-{}", std::process::id()));
+        Self::initialize(conn, ImageStore::open(&storage_root)?)
     }
 
-    fn initialize(mut conn: Connection) -> Result<Self> {
+    fn initialize(mut conn: Connection, image_store: ImageStore) -> Result<Self> {
         let journal_mode: String =
             conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
         log::debug!(target: "aidopaste", "journal_mode={journal_mode}");
@@ -108,6 +125,7 @@ impl Database {
         run_migrations(&mut conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            image_store,
         })
     }
 
@@ -128,8 +146,12 @@ impl Database {
     /// 仅刷新 updated_at 并更新来源，保留 created_at 与 Pin 状态。
     pub fn create_item(&self, new_item: NewClipboardItem) -> Result<ClipboardItem> {
         new_item.validate()?;
-        let (item_type, metadata) = refine_type_and_metadata(&new_item);
-        let content_hash = dedup::hash_for_new_item(&new_item)?;
+        // 图片载荷强制按 Image 处理；哈希基于图片字节而非路径（§17）
+        let (item_type, metadata) = if new_item.image_source_path.is_some() {
+            (ItemType::Image, new_item.metadata.clone())
+        } else {
+            refine_type_and_metadata(&new_item)
+        };
         // 标题 / 预览必须按细分后的类型推导（例如文本形式的 URL 要取域名做标题）
         let mut effective = new_item.clone();
         effective.item_type = item_type;
@@ -141,7 +163,17 @@ impl Database {
                 .map(str::trim)
                 .map(str::to_string);
         }
-        let content_size = effective.content_size();
+        // 哈希与大小：图片读字节（§16 临时文件 → Core 转存）；其余按文本内容
+        let (content_hash, content_size) =
+            if let Some(source) = new_item.image_source_path.as_deref() {
+                let bytes = fs::read(source)?;
+                (dedup::sha256_hex(&bytes), bytes.len() as i64)
+            } else {
+                (
+                    dedup::hash_for_new_item(&new_item)?,
+                    effective.content_size(),
+                )
+            };
         let now = now_ms();
         let created_at = new_item.created_at.unwrap_or(now);
         let title = new_item.title.clone().or_else(|| effective.derive_title());
@@ -169,12 +201,20 @@ impl Database {
                 id
             }
             None => {
+                // 新图片：先转存文件拿到路径，再入库；转存失败则整体失败，不落脏行
+                let (image_path, thumbnail_path) = match new_item.image_source_path.as_deref() {
+                    Some(source) => {
+                        let stored = self.image_store.store(Path::new(source), &content_hash)?;
+                        (Some(stored.image_path), stored.thumbnail_path)
+                    }
+                    None => (None, None),
+                };
                 tx.execute(
                     "INSERT INTO clipboard_items
                         (type, created_at, updated_at, title, preview, text_content, url,
-                         file_path, source_app, source_app_name, content_size, uti,
-                         content_hash, is_pinned, metadata)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14)",
+                         file_path, image_path, thumbnail_path, source_app, source_app_name,
+                         content_size, uti, content_hash, is_pinned, metadata)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ?16)",
                     params![
                         item_type.as_str(),
                         created_at,
@@ -184,6 +224,8 @@ impl Database {
                         new_item.text_content,
                         new_item.url,
                         new_item.file_path,
+                        image_path,
+                        thumbnail_path,
                         new_item.source_app,
                         new_item.source_app_name,
                         content_size,
@@ -253,23 +295,32 @@ impl Database {
         crate::search::search_engine::search(&conn, query, filter, limit.min(MAX_PAGE_SIZE), offset)
     }
 
-    /// 删除单条。
+    /// 删除单条，并同步清理图片产物文件（§32）。
     pub fn delete_item(&self, id: i64) -> Result<()> {
         let conn = self.lock_conn()?;
+        let artifacts = fetch_artifacts(&conn, std::slice::from_ref(&id))?;
         let affected = conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
         if affected == 0 {
             return Err(AidoPasteError::NotFound(id));
+        }
+        drop(conn);
+        for (image_path, thumbnail_path) in artifacts {
+            self.image_store
+                .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
         log::info!(target: "aidopaste", "item deleted id={id}");
         Ok(())
     }
 
     /// 批量删除，返回实际删除数。分批执行以规避 SQLite 参数上限。
+    /// 删除的条目若带图片产物，文件一并清理（§32）。
     pub fn delete_items(&self, ids: &[i64]) -> Result<usize> {
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
         let mut deleted = 0;
+        let mut artifacts: Vec<Artifacts> = Vec::new();
         for chunk in ids.chunks(500) {
+            artifacts.extend(fetch_artifacts(&tx, chunk)?);
             let placeholders = vec!["?"; chunk.len()].join(", ");
             let values: Vec<Value> = chunk.iter().map(|id| Value::Integer(*id)).collect();
             deleted += tx.execute(
@@ -278,6 +329,11 @@ impl Database {
             )?;
         }
         tx.commit()?;
+        drop(conn);
+        for (image_path, thumbnail_path) in artifacts {
+            self.image_store
+                .remove(image_path.as_deref(), thumbnail_path.as_deref());
+        }
         if deleted > 0 {
             log::info!(target: "aidopaste", "items deleted count={deleted}");
         }
@@ -305,35 +361,54 @@ impl Database {
         Ok(())
     }
 
-    /// 删除过期未 Pin 条目（§32）。`now_ms` 由调用方注入，便于测试与调度。
+    /// 删除过期未 Pin 条目（§32），图片产物文件一并清理。`now_ms` 由调用方注入，便于测试与调度。
     pub fn cleanup_expired(&self, retention: Retention, now_ms: i64) -> Result<usize> {
         let Some(days) = retention.days() else {
             return Ok(0);
         };
         let cutoff = now_ms - (days as i64) * 86_400_000;
-        let conn = self.lock_conn()?;
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND updated_at < ?1",
+        let criteria = "WHERE is_pinned = 0 AND updated_at < ?1";
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let mut artifacts = fetch_artifacts_where(&tx, criteria, params![cutoff])?;
+        let deleted = tx.execute(
+            &format!("DELETE FROM clipboard_items {criteria}"),
             params![cutoff],
         )?;
+        tx.commit()?;
+        drop(conn);
+        artifacts.truncate(deleted);
+        for (image_path, thumbnail_path) in artifacts {
+            self.image_store
+                .remove(image_path.as_deref(), thumbnail_path.as_deref());
+        }
         if deleted > 0 {
             log::info!(target: "aidopaste", "cleanup deleted count={deleted}");
         }
         Ok(deleted)
     }
 
-    /// 历史条数上限（§50）：超出部分从最旧的非 Pin 条目删起。
+    /// 历史条数上限（§50）：超出部分从最旧的非 Pin 条目删起，图片产物一并清理。
     pub fn enforce_history_limit(&self, max_count: usize) -> Result<usize> {
-        let conn = self.lock_conn()?;
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_items
-             WHERE is_pinned = 0 AND id IN (
+        let selection = "WHERE is_pinned = 0 AND id IN (
                  SELECT id FROM clipboard_items WHERE is_pinned = 0
                  ORDER BY updated_at DESC, id DESC
                  LIMIT -1 OFFSET ?1
-             )",
+             )";
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let mut artifacts = fetch_artifacts_where(&tx, selection, params![max_count as i64])?;
+        let deleted = tx.execute(
+            &format!("DELETE FROM clipboard_items {selection}"),
             params![max_count as i64],
         )?;
+        tx.commit()?;
+        drop(conn);
+        artifacts.truncate(deleted);
+        for (image_path, thumbnail_path) in artifacts {
+            self.image_store
+                .remove(image_path.as_deref(), thumbnail_path.as_deref());
+        }
         if deleted > 0 {
             log::info!(target: "aidopaste", "history limit trimmed count={deleted}");
         }
@@ -371,6 +446,49 @@ impl Database {
             by_type,
         })
     }
+}
+
+/// §20：存储根目录默认取数据库文件的祖父目录
+/// （`.../AidoPaste/Database/clipboard.db` → `.../AidoPaste`）。
+fn derive_storage_root(db_path: &Path) -> PathBuf {
+    db_path
+        .parent()
+        .and_then(|database_dir| database_dir.parent())
+        .map(Path::to_path_buf)
+        .or_else(|| db_path.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// 查询指定 id 列表的图片产物路径，供删除后清理文件（§32）。
+fn fetch_artifacts(conn: &Connection, ids: &[i64]) -> Result<Vec<Artifacts>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; ids.len()].join(", ");
+    fetch_artifacts_where(
+        conn,
+        &format!("WHERE id IN ({placeholders})"),
+        params_from_iter(ids.iter().copied()),
+    )
+}
+
+/// 按任意 WHERE 条件查询图片产物路径。
+fn fetch_artifacts_where(
+    conn: &Connection,
+    criteria: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<Artifacts>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT image_path, thumbnail_path FROM clipboard_items {criteria}"
+    ))?;
+    let rows = stmt.query_map(params, |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+        ))
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(AidoPasteError::from)
 }
 
 /// Text 类型走规则分类器细分（§19）；检测到代码语言时写入 `metadata.language`。

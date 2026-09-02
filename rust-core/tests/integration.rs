@@ -325,3 +325,87 @@ fn concurrent_writers_are_serialized_safely() {
     // 80 条内容各不相同
     assert_eq!(db.get_items(None, 1000, 0).unwrap().len(), 80);
 }
+
+// MARK: - 图片（Phase 7）
+
+/// 生成测试 PNG 文件，返回 (目录守卫, 文件路径, 文件大小)。
+fn make_png(name: &str, width: u32, height: u32) -> (tempfile::TempDir, std::path::PathBuf, i64) {
+    use image::Rgba;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(name);
+    let image = image::RgbaImage::from_pixel(width, height, Rgba([60, 120, 200, 255]));
+    image
+        .save_with_format(&path, image::ImageFormat::Png)
+        .unwrap();
+    let size = std::fs::metadata(&path).unwrap().len() as i64;
+    (dir, path, size)
+}
+
+fn image_item(source: &std::path::Path) -> NewClipboardItem {
+    NewClipboardItem {
+        item_type: ItemType::Image,
+        image_source_path: Some(source.to_string_lossy().into_owned()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn image_items_are_stored_with_thumbnail_and_dedup() {
+    let db = Database::open_in_memory().unwrap();
+    let (_guard, path, size) = make_png("capture.png", 640, 480);
+
+    let first = db.create_item(image_item(&path)).unwrap();
+    assert_eq!(first.item_type, ItemType::Image);
+    assert_eq!(first.content_size, size);
+    let image_path = first.image_path.clone().expect("image path set");
+    let thumbnail_path = first.thumbnail_path.clone().expect("thumbnail generated");
+    assert!(std::path::Path::new(&image_path).exists());
+    assert!(std::path::Path::new(&thumbnail_path).exists());
+
+    // 缩略图最长边不超过 320（§59）
+    let decoded = image::open(&thumbnail_path).unwrap();
+    assert!(decoded.width() <= 320 && decoded.height() <= 320);
+
+    // 相同图片再次复制：去重 touch，不新增文件
+    let again = db.create_item(image_item(&path)).unwrap();
+    assert_eq!(first.id, again.id);
+    assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 1);
+
+    // 删除条目：图片与缩略图一并清理（§32）
+    db.delete_item(first.id).unwrap();
+    assert!(!std::path::Path::new(&image_path).exists());
+    assert!(!std::path::Path::new(&thumbnail_path).exists());
+}
+
+#[test]
+fn cleanup_and_history_limit_remove_image_artifacts() {
+    let db = Database::open_in_memory().unwrap();
+    let (_guard, path, _) = make_png("cleanup.png", 200, 200);
+    let item = db.create_item(image_item(&path)).unwrap();
+    let image_path = item.image_path.clone().unwrap();
+    let thumbnail_path = item.thumbnail_path.clone().unwrap();
+
+    let future = aidopaste_core::clipboard::model::now_ms() + 2 * 86_400_000;
+    assert_eq!(db.cleanup_expired(Retention::OneDay, future).unwrap(), 1);
+    assert!(!std::path::Path::new(&image_path).exists());
+    assert!(!std::path::Path::new(&thumbnail_path).exists());
+
+    // 历史条数上限同样清理文件
+    let item = db.create_item(image_item(&path)).unwrap();
+    let image_path = item.image_path.clone().unwrap();
+    assert_eq!(db.enforce_history_limit(0).unwrap(), 1);
+    assert!(!std::path::Path::new(&image_path).exists());
+}
+
+#[test]
+fn batch_delete_removes_image_artifacts() {
+    let db = Database::open_in_memory().unwrap();
+    let (_guard_a, path_a, _) = make_png("a.png", 64, 64);
+    let (_guard_b, path_b, _) = make_png("b.png", 64, 64);
+    let a = db.create_item(image_item(&path_a)).unwrap();
+    let b = db.create_item(image_item(&path_b)).unwrap();
+
+    db.delete_items(&[a.id, b.id]).unwrap();
+    assert!(!std::path::Path::new(&a.image_path.unwrap()).exists());
+    assert!(!std::path::Path::new(&b.thumbnail_path.unwrap()).exists());
+}

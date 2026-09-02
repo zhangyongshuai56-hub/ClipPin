@@ -136,6 +136,8 @@ pub struct NewClipboardItem {
     pub text_content: Option<String>,
     pub url: Option<String>,
     pub file_path: Option<String>,
+    /// 图片暂存文件路径（§16：Swift 落临时文件，Core 读取转存）。
+    pub image_source_path: Option<String>,
     pub uti: Option<String>,
     pub source_app: Option<String>,
     pub source_app_name: Option<String>,
@@ -151,6 +153,7 @@ fn to_core_new_item(item: NewClipboardItem) -> CoreNewItem {
         text_content: item.text_content,
         url: item.url,
         file_path: item.file_path,
+        image_source_path: item.image_source_path,
         uti: item.uti,
         source_app: item.source_app,
         source_app_name: item.source_app_name,
