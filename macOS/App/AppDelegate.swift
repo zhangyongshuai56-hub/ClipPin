@@ -15,6 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let monitor = ClipboardMonitor(appState: appState, repository: repository)
             monitor.start()
             clipboardMonitor = monitor
+
+            // 调试 / 自动化测试钩子：传入 -AidoPasteShowWindowOnLaunch 时启动即显示主窗口
+            if ProcessInfo.processInfo.arguments.contains("-AidoPasteShowWindowOnLaunch") {
+                WindowManager.shared.showClipboardWindow()
+            }
         }
     }
 

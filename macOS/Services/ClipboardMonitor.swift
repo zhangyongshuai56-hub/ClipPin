@@ -2,6 +2,11 @@ import AppKit
 import Foundation
 import os
 
+extension Notification.Name {
+    /// 监听器成功入库一条新内容后发出；UI 据此刷新列表。
+    static let clipboardMonitorDidSaveItem = Notification.Name("com.aidopaste.clipboard.didSaveItem")
+}
+
 /// 剪贴板监听（§15、§18、§33、§39、§40、§44）。
 ///
 /// - 单个 Timer 以 0.5s 间隔检查 `changeCount`（O(1) 调用，非高频轮询，§44）；
@@ -19,8 +24,6 @@ final class ClipboardMonitor {
     private var timer: Timer?
     /// 最近见过的 changeCount；-1 表示尚未建立基线（首次检查会捕获当前剪贴板）。
     private var lastChangeCount: Int = -1
-    /// §18：应用自己写入产生的 changeCount，各跳过一次。
-    private var suppressedChangeCounts: Set<Int> = []
     /// 后台捕获进行中标记，避免重复并发捕获。
     private var isCapturing = false
 
@@ -50,11 +53,8 @@ final class ClipboardMonitor {
         logger.info("clipboard monitor stopped")
     }
 
-    /// §18：应用把历史内容写回剪贴板（Phase 5 的复制）之后调用，
-    /// 传入写入后读到的 changeCount，使监听跳过这一次变更。
-    func suppressChange(count: Int) {
-        suppressedChangeCounts.insert(count)
-    }
+    /// §18：应用把历史内容写回剪贴板（如复制历史条目）之后，监听会自动跳过
+    /// 对应的 changeCount；抑制表由 ClipboardChangeGate 统一管理。
 
     private func checkOnce() {
         // §40：暂停时不记录
@@ -64,7 +64,7 @@ final class ClipboardMonitor {
         guard changeCount != lastChangeCount else { return }
 
         // §18：自家写入导致的变更，只更新基线不捕获
-        if suppressedChangeCounts.remove(changeCount) != nil {
+        if ClipboardChangeGate.shared.consumeIfSuppressed(changeCount) {
             lastChangeCount = changeCount
             logger.debug("clipboard change suppressed (internal write)")
             return
@@ -111,6 +111,8 @@ final class ClipboardMonitor {
 
     private func captureDidSave(id: Int64, byteSize: Int64) {
         logger.info("clipboard captured id=\(id) bytes=\(byteSize)")
+        // 通知 UI 层刷新（ViewModel 会做防抖合并）
+        NotificationCenter.default.post(name: .clipboardMonitorDidSaveItem, object: nil)
     }
 
     private func captureDidFail(_ error: any Error) {

@@ -1,25 +1,50 @@
 import SwiftUI
 
-/// 剪贴板历史主界面。Phase 1 仅包含空状态，列表 / 搜索 / 预览在 Phase 5 实现。
+/// 剪贴板主界面（§22）：侧栏分类 + 列表 + 详情预览。
 struct ClipboardView: View {
+    @State private var viewModel: ClipboardViewModel
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+
+    init(viewModel: ClipboardViewModel) {
+        _viewModel = State(initialValue: viewModel)
+    }
 
     private var appearance: AppearanceMode {
         AppearanceMode(rawValue: appearanceRaw) ?? .system
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            ContentUnavailableView {
-                Label("还没有剪贴板记录", systemImage: "doc.on.clipboard")
-            } description: {
-                Text("复制一些文字、图片或文件，它们会自动出现在这里。")
+        HStack(spacing: 0) {
+            Sidebar(selection: $viewModel.category)
+                .frame(width: 176)
+            Divider()
+                .ignoresSafeArea()
+            VStack(spacing: 0) {
+                SearchBar(viewModel: viewModel)
+                Divider()
+                ClipboardList(viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            Label("⌘ ⇧ V 打开剪贴板", systemImage: "keyboard")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if let entry = viewModel.selectedEntry {
+                Divider()
+                    .ignoresSafeArea()
+                ClipboardPreview(entry: entry, viewModel: viewModel)
+                    .frame(width: 280)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 760, minHeight: 470)
         .preferredColorScheme(appearance.colorScheme)
+        .task { await viewModel.loadInitial() }
+        .alert(
+            "操作失败",
+            isPresented: Binding(
+                get: { viewModel.errorMessage != nil },
+                set: { if !$0 { viewModel.errorMessage = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
     }
 }

@@ -10,7 +10,7 @@ struct MenuBarContentView: View {
             WindowManager.shared.showClipboardWindow()
         }
         Button("搜索剪贴板") {
-            // TODO(Phase 5): 打开后聚焦搜索输入框
+            // 打开窗口并聚焦搜索框
             WindowManager.shared.showClipboardWindow(focusSearch: true)
         }
         Divider()

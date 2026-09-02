@@ -112,6 +112,47 @@ extension ClipboardEntry {
         isPinned = item.isPinned
         metadata = item.metadata
     }
+
+    /// 以既有内容再次构造输入：提交给 Core 后经 content_hash 去重只刷新最近使用时间（§17）。
+    func toNewItem() -> NewClipboardEntry {
+        var item = NewClipboardEntry()
+        item.itemType = itemType
+        item.textContent = textContent
+        item.url = url
+        item.filePath = filePath
+        item.uti = uti
+        item.createdAt = createdAt
+        item.metadata = metadata
+        return item
+    }
+}
+
+extension ClipboardEntryType {
+    var title: String {
+        switch self {
+        case .text: "文本"
+        case .url: "链接"
+        case .image: "图片"
+        case .file: "文件"
+        case .folder: "文件夹"
+        case .richText: "富文本"
+        case .code: "代码"
+        case .other: "其他"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .text: "doc.on.doc"
+        case .url: "globe"
+        case .image: "photo"
+        case .file: "doc"
+        case .folder: "folder"
+        case .richText: "doc.richtext"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .other: "doc.plaintext"
+        }
+    }
 }
 
 /// 新条目输入（§16 方向：Swift → Rust）。
