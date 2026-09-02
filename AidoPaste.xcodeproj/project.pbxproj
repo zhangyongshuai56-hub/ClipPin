@@ -217,7 +217,7 @@
 					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-laidopaste_core",
@@ -254,7 +254,7 @@
 					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-laidopaste_core",
