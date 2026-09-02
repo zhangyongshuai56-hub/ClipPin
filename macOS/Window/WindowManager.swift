@@ -20,6 +20,8 @@ final class WindowManager {
             logger.error("clipboard window requested before core is ready")
             return
         }
+        // §37：在激活自己之前记录前台应用，作为 Quick Paste 的粘贴目标
+        PasteService.shared.noteWindowAboutToShow()
         let window = clipboardWindow ?? makeClipboardWindow(repository: repository)
         positionWindowNearMouse(window)
         window.makeKeyAndOrderFront(nil)

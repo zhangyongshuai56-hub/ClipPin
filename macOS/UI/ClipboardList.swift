@@ -69,9 +69,13 @@ struct ClipboardList: View {
         case 126: // ↑
             viewModel.moveSelection(-1)
             return nil
-        case 36, 76: // Return / Enter：复制（⌘Enter 的粘贴在 Phase 10 接入）
+        case 36, 76: // Enter：复制；⌘Enter：复制并粘贴（§28、§37）
             guard let entry = viewModel.selectedEntry else { return event }
-            viewModel.copyToPasteboard(entry)
+            if commandPressed {
+                Task { await viewModel.copyAndPaste(entry) }
+            } else {
+                viewModel.copyToPasteboard(entry)
+            }
             return nil
         case 51, 117: // Delete / Forward delete：删除
             guard let entry = viewModel.selectedEntry else { return event }
@@ -140,10 +144,13 @@ struct ClipboardList: View {
         return NSItemProvider()
     }
 
-    /// 右键菜单（§66）。「复制并粘贴」在 Phase 10（Accessibility）接入。
+    /// 右键菜单（§66）。
     @ViewBuilder
     private func contextMenu(for entry: ClipboardEntry) -> some View {
         Button("复制") { viewModel.copyToPasteboard(entry) }
+        Button("复制并粘贴") {
+            Task { await viewModel.copyAndPaste(entry) }
+        }
         Divider()
         Button(entry.isPinned ? "取消 Pin" : "Pin") {
             Task { await viewModel.togglePin(entry) }

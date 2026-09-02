@@ -18,6 +18,7 @@ private struct GeneralSettingsView: View {
     @Environment(AppState.self) private var appState
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     @State private var launchAtLogin = LaunchAtLoginService.isEnabled
+    @State private var accessibilityTrusted = PasteService.shared.isAccessibilityTrusted
     @State private var launchAtLoginErrorMessage: String?
 
     var body: some View {
@@ -51,6 +52,14 @@ private struct GeneralSettingsView: View {
                     WindowManager.shared.applyAppearanceToAllWindows()
                 }
             }
+            Section("权限") {
+                LabeledContent("辅助功能（自动粘贴）", value: accessibilityTrusted ? "✓ 已授权" : "⚠️ 未授权")
+                if !accessibilityTrusted {
+                    Button("打开系统设置") {
+                        PasteService.shared.openAccessibilitySettings()
+                    }
+                }
+            }
             Section("快捷键") {
                 LabeledContent("打开剪贴板", value: HotKeyCombo.defaultOpenClipboard.displayString)
                 Text("自定义全局快捷键将在后续版本提供。")
@@ -62,6 +71,7 @@ private struct GeneralSettingsView: View {
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
         .onAppear {
             launchAtLogin = LaunchAtLoginService.isEnabled
+            accessibilityTrusted = PasteService.shared.isAccessibilityTrusted
         }
         .alert(
             "无法更新登录启动设置",

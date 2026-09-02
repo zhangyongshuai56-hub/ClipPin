@@ -59,6 +59,8 @@ final class ClipboardViewModel {
     private(set) var isLoading = false
     private(set) var canLoadMore = false
     var errorMessage: String?
+    /// Quick Paste 缺少辅助功能权限时弹出引导（§38）。
+    var showAccessibilityPrompt = false
 
     /// 当前选中的条目。
     var selectedEntry: ClipboardEntry? {
@@ -195,8 +197,35 @@ final class ClipboardViewModel {
 
     // MARK: - 动作（§28、§31、§37、§66）
 
-    /// 复制条目到剪贴板（§37 前半；⌘Enter 的"粘贴"在 Phase 10 接入）。
+    /// 复制条目到剪贴板（§28 Enter）。
     func copyToPasteboard(_ entry: ClipboardEntry) {
+        writeToPasteboard(entry)
+    }
+
+    /// Quick Paste（§37、§28 ⌘Enter）：复制 → 隐藏窗口 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
+    /// 缺少辅助功能权限时弹出引导，不静默失败。
+    func copyAndPaste(_ entry: ClipboardEntry) async {
+        guard PasteService.shared.isAccessibilityTrusted else {
+            showAccessibilityPrompt = true
+            return
+        }
+        // 先快照用户原剪贴板，粘贴完成后恢复（§37）
+        let snapshot = PasteService.shared.captureCurrentContents()
+        guard writeToPasteboard(entry) else { return }
+        let pasted = await PasteService.shared.pasteToPreviousApp {
+            WindowManager.shared.hideClipboardWindow()
+        }
+        guard pasted else {
+            errorMessage = "未能自动粘贴：无法激活之前的应用。"
+            return
+        }
+        // 给目标应用完成粘贴的时间，再恢复用户原剪贴板
+        try? await Task.sleep(for: .milliseconds(600))
+        PasteService.shared.restore(snapshot)
+    }
+
+    @discardableResult
+    private func writeToPasteboard(_ entry: ClipboardEntry) -> Bool {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let success: Bool
@@ -231,7 +260,7 @@ final class ClipboardViewModel {
         }
         guard success else {
             errorMessage = "该内容暂不支持复制。"
-            return
+            return false
         }
         // §18：自家写入不再被监听捕获；同时通过去重 touch 刷新最近使用时间
         ClipboardChangeGate.shared.suppress(pasteboard.changeCount)
@@ -239,6 +268,7 @@ final class ClipboardViewModel {
             _ = try? await repository.create(entry.toNewItem())
             await load(reset: true)
         }
+        return true
     }
 
     func togglePin(_ entry: ClipboardEntry) async {

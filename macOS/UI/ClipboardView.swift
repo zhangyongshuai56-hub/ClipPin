@@ -46,5 +46,19 @@ struct ClipboardView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+        .alert(
+            "需要辅助功能权限",
+            isPresented: Binding(
+                get: { viewModel.showAccessibilityPrompt },
+                set: { viewModel.showAccessibilityPrompt = $0 }
+            )
+        ) {
+            Button("打开系统设置") {
+                PasteService.shared.openAccessibilitySettings()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("自动粘贴需要「辅助功能」权限。授权后重新按 ⌘↩ 即可粘贴。")
+        }
     }
 }
