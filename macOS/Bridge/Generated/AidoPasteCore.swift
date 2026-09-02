@@ -633,6 +633,11 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
     func searchItems(query: String, filter: ItemType?, limit: Int64, offset: Int64) throws  -> [ClipboardItem]
     
     /**
+     * 清扫孤儿图片文件（§48），返回删除数。
+     */
+    func sweepOrphanArtifacts() throws  -> Int64
+    
+    /**
      * Unpin（§31）。
      */
     func unpinItem(id: Int64) throws 
@@ -871,6 +876,18 @@ open func searchItems(query: String, filter: ItemType?, limit: Int64, offset: In
         FfiConverterOptionTypeItemType.lower(filter),
         FfiConverterInt64.lower(limit),
         FfiConverterInt64.lower(offset),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * 清扫孤儿图片文件（§48），返回删除数。
+     */
+open func sweepOrphanArtifacts()throws  -> Int64  {
+    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_sweep_orphan_artifacts(
+            self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
 }
@@ -1819,6 +1836,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_search_items() != 7293) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_sweep_orphan_artifacts() != 60357) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_unpin_item() != 48318) {

@@ -60,6 +60,50 @@ impl ImageStore {
         })
     }
 
+    /// 清扫孤儿产物文件（§48）：不在引用集合中的文件删除。
+    /// 一小时内的 `.tmp-` 文件视为进行中的转存，跳过以避免竞争。
+    pub fn sweep_orphans(&self, referenced: &std::collections::HashSet<String>) -> Result<usize> {
+        let mut removed = self.sweep_dir(&self.images_dir, referenced)?;
+        removed += self.sweep_dir(&self.thumbnails_dir, referenced)?;
+        Ok(removed)
+    }
+
+    fn sweep_dir(
+        &self,
+        dir: &Path,
+        referenced: &std::collections::HashSet<String>,
+    ) -> Result<usize> {
+        let mut removed = 0;
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if referenced.contains(name) {
+                continue;
+            }
+            if name.starts_with(".tmp-") {
+                let recent = entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() < 3_600);
+                if recent {
+                    continue;
+                }
+            }
+            if fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     /// 删除条目对应的图片与缩略图文件（§32）。文件不存在时忽略。
     pub fn remove(&self, image_path: Option<&str>, thumbnail_path: Option<&str>) {
         for path in [image_path, thumbnail_path].into_iter().flatten() {

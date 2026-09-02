@@ -378,6 +378,11 @@ impl AidoPasteDatabase {
     pub fn get_statistics(&self) -> Result<Statistics, AidoPasteError> {
         Ok(self.db.get_statistics()?.into())
     }
+
+    /// 清扫孤儿图片文件（§48），返回删除数。
+    pub fn sweep_orphan_artifacts(&self) -> Result<i64, AidoPasteError> {
+        Ok(self.db.sweep_orphan_artifacts()? as i64)
+    }
 }
 
 #[cfg(test)]

@@ -477,3 +477,32 @@ fn missing_files_fail_without_creating_rows() {
     ));
     assert_eq!(db.get_items(None, 100, 0).unwrap().len(), 0);
 }
+
+// MARK: - 孤儿文件清扫（Phase 9，§48）
+
+#[test]
+fn sweep_removes_orphans_and_keeps_referenced_and_recent_tmp() {
+    let db = Database::open_in_memory().unwrap();
+    let (_guard, path, _) = make_png("sweep.png", 100, 100);
+    let item = db.create_item(image_item(&path)).unwrap();
+    let image_path = std::path::PathBuf::from(item.image_path.clone().unwrap());
+    let thumbnail_path = std::path::PathBuf::from(item.thumbnail_path.clone().unwrap());
+    let images_dir = image_path.parent().unwrap().to_path_buf();
+    let thumbnails_dir = thumbnail_path.parent().unwrap().to_path_buf();
+
+    // 制造孤儿文件与一个"进行中"的临时文件
+    std::fs::write(images_dir.join("orphan-deadbeef.png"), b"x").unwrap();
+    std::fs::write(thumbnails_dir.join("orphan-old.png"), b"x").unwrap();
+    std::fs::write(images_dir.join(".tmp-recent.png"), b"x").unwrap();
+
+    let removed = db.sweep_orphan_artifacts().unwrap();
+    assert_eq!(removed, 2);
+    assert!(image_path.exists(), "被引用的原图应保留");
+    assert!(thumbnail_path.exists(), "被引用的缩略图应保留");
+    assert!(!images_dir.join("orphan-deadbeef.png").exists());
+    assert!(!thumbnails_dir.join("orphan-old.png").exists());
+    assert!(
+        images_dir.join(".tmp-recent.png").exists(),
+        "进行中的临时文件应保留"
+    );
+}

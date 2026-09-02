@@ -42,8 +42,8 @@ enum ClipboardEntryType: Hashable, Sendable, CaseIterable {
     }
 }
 
-/// 历史保留时长（§32）。
-enum RetentionPolicy: Hashable, Sendable, CaseIterable {
+/// 历史保留时长（§32）。rawValue 持久化于 UserDefaults。
+enum RetentionPolicy: String, Hashable, Sendable, CaseIterable {
     case oneDay
     case sevenDays
     case thirtyDays

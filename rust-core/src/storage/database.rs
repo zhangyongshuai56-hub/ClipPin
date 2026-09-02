@@ -107,11 +107,13 @@ impl Database {
         Self::initialize(conn, ImageStore::open(storage_root)?)
     }
 
-    /// 内存数据库，供测试与临时场景。图片产物落在临时目录。
+    /// 内存数据库，供测试与临时场景。图片产物落在独立临时目录（实例间互不干扰）。
     pub fn open_in_memory() -> Result<Self> {
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let conn = Connection::open_in_memory()?;
-        let storage_root =
-            std::env::temp_dir().join(format!("aidopaste-images-{}", std::process::id()));
+        let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let storage_root = std::env::temp_dir()
+            .join(format!("aidopaste-images-{}-{sequence}", std::process::id()));
         Self::initialize(conn, ImageStore::open(&storage_root)?)
     }
 
@@ -389,6 +391,33 @@ impl Database {
             log::info!(target: "aidopaste", "history limit trimmed count={deleted}");
         }
         Ok(deleted)
+    }
+
+    /// 清扫孤儿图片产物（§48）：数据库不再引用的 Images / Thumbnails 文件。
+    pub fn sweep_orphan_artifacts(&self) -> Result<usize> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT image_path, thumbnail_path FROM clipboard_items
+             WHERE image_path IS NOT NULL OR thumbnail_path IS NOT NULL",
+        )?;
+        let mut referenced = std::collections::HashSet::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        })?;
+        for row in rows {
+            let (image_path, thumbnail_path) = row?;
+            for path in [image_path, thumbnail_path].into_iter().flatten() {
+                if let Some(name) = Path::new(&path).file_name().and_then(|n| n.to_str()) {
+                    referenced.insert(name.to_string());
+                }
+            }
+        }
+        drop(stmt);
+        drop(conn);
+        self.image_store.sweep_orphans(&referenced)
     }
 
     /// 统计信息（§54 get_statistics）。

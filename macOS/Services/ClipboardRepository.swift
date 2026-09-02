@@ -69,9 +69,14 @@ actor ClipboardRepository {
         Int(try database.cleanupExpired(retention: retention.ffi))
     }
 
-    /// 历史条数上限（§50），返回清理条数。
+    /// 历史条数上限（§50），返回清理条数。调用方须保证 maxCount > 0（0 表示不限制）。
     func enforceHistoryLimit(_ maxCount: Int) throws -> Int {
         Int(try database.enforceHistoryLimit(maxCount: Int64(maxCount)))
+    }
+
+    /// 孤儿图片文件清扫（§48），返回删除数。
+    func sweepOrphanArtifacts() throws -> Int {
+        Int(try database.sweepOrphanArtifacts())
     }
 
     func statistics() throws -> ClipboardStatistics {

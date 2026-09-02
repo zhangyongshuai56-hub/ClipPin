@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var clipboardMonitor: ClipboardMonitor?
+    private var cleanupScheduler: CleanupScheduler?
     private let globalShortcutManager = GlobalShortcutManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -16,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let monitor = ClipboardMonitor(appState: appState, repository: repository)
             monitor.start()
             clipboardMonitor = monitor
+
+            // §32/§50：启动清扫一次，此后每 6 小时一轮
+            let scheduler = CleanupScheduler(repository: repository)
+            scheduler.start()
+            cleanupScheduler = scheduler
 
             registerGlobalShortcut()
 
@@ -38,8 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // §61：退出时先停止监听；仓储操作都是同步落库，无需额外 flush
+        // §61：退出时先停止监听与调度；仓储操作都是同步落库，无需额外 flush
         clipboardMonitor?.stop()
+        cleanupScheduler?.stop()
         return .terminateNow
     }
 }
