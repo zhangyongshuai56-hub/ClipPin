@@ -102,8 +102,8 @@ struct ClipboardView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                        .frame(width: 24, height: 24)
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("搜索")
@@ -120,14 +120,14 @@ struct ClipboardView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                    .frame(width: 24, height: 24)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("新建文件夹")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 
     /// 板 chips：默认「剪贴板」+ 用户创建的文件夹。
@@ -159,10 +159,10 @@ struct ClipboardView: View {
                 .fill(color ?? Color.accentColor)
                 .frame(width: 8, height: 8)
             Text(title)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
         .background(
             isSelected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05),
             in: Capsule()
@@ -192,7 +192,7 @@ struct ClipboardView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 12) {
+                        LazyHStack(spacing: 8) {
                             ForEach(viewModel.entries) { entry in
                                 card(entry)
                             }
@@ -202,7 +202,7 @@ struct ClipboardView: View {
                                     .frame(width: 60)
                             }
                         }
-                        .padding(14)
+                        .padding(10)
                     }
                     .onChange(of: viewModel.selectionID) { _, newID in
                         guard let newID else { return }
@@ -385,7 +385,7 @@ struct SearchField: View {
                 .foregroundStyle(.secondary)
             TextField("搜索剪贴板…", text: $viewModel.searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.system(size: 13))
                 .focused($searchFocused)
                 .accessibilityLabel("搜索剪贴板")
             Button {
@@ -399,7 +399,7 @@ struct SearchField: View {
             .accessibilityLabel("退出搜索")
         }
         .padding(.horizontal, 10)
-        .frame(height: 30)
+        .frame(height: 26)
         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         .onAppear { searchFocused = true }
         .onChange(of: viewModel.searchFocusRequest) {
@@ -414,7 +414,7 @@ struct StatusFooter: View {
     let totalCount: Int
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             shortcut("↩", defaultAction == .activeApp ? "粘贴到当前应用" : "复制到剪贴板")
             if defaultAction == .activeApp {
                 shortcut("⌘↩", "粘贴到当前应用")
@@ -428,10 +428,10 @@ struct StatusFooter: View {
             Text("\(totalCount) 条记录")
                 .foregroundStyle(.tertiary)
         }
-        .font(.system(size: 11.5))
+        .font(.system(size: 11))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private func shortcut(_ key: String, _ action: String) -> some View {

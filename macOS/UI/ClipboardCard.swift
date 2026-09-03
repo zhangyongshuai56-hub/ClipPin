@@ -8,20 +8,23 @@ struct ClipboardCard: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
                 Image(systemName: entry.itemType.symbolName)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Text(entry.itemType.title)
                     .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
                 Text(entry.updatedAt.shelfRelativeTime)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
             }
             bodyContent
-                .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            Spacer(minLength: 0)
             HStack(spacing: 4) {
                 Spacer(minLength: 0)
                 if let source = entry.sourceAppName {
@@ -36,8 +39,8 @@ struct ClipboardCard: View {
                 }
             }
         }
-        .padding(10)
-        .frame(height: 112, alignment: .topLeading)
+        .padding(8)
+        .frame(minWidth: 150, maxWidth: 150, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 10)
                 .fill(
@@ -67,17 +70,6 @@ struct ClipboardCard: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var headText: String {
-        var text = entry.itemType.title
-        if entry.itemType == .code, let language = entry.codeLanguage {
-            text += " · \(language)"
-        }
-        if let source = entry.sourceAppName {
-            text += " · \(source)"
-        }
-        return text
-    }
-
     // MARK: - 内容预览（需求 §2 卡片形态）
 
     @ViewBuilder
@@ -92,6 +84,7 @@ struct ClipboardCard: View {
                 Text(entry.title ?? entry.url ?? "链接")
                     .foregroundStyle(.tint)
                     .fontWeight(.medium)
+                    .lineLimit(2)
                 Text(entry.url ?? "")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -101,6 +94,7 @@ struct ClipboardCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.title ?? entry.filePath ?? "文件")
                     .fontWeight(.medium)
+                    .lineLimit(1)
                 Text(entry.filePath ?? "")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)

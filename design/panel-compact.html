@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif; background: #1a1c20; }
+  .scene { width: 1400px; height: 560px; position: relative; overflow: hidden; }
+  .scene.light { background: linear-gradient(135deg, #dfe5ee 0%, #c9d4e4 40%, #e8e2d8 100%); }
+  .scene.dark  { background: linear-gradient(135deg, #17191d 0%, #20242c 45%, #14181d 100%); }
+  .fake { position: absolute; border-radius: 8px; }
+  .fake.light { background: rgba(255,255,255,.86); box-shadow: 0 14px 40px rgba(30,40,60,.16); }
+  .fake.dark  { background: rgba(52,58,68,.92); box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+  .fake .bar { height: 20px; border-radius: 8px 8px 0 0; display: flex; align-items: center; gap: 4px; padding: 0 8px; }
+  .fake.light .bar { background: rgba(0,0,0,.05); }
+  .fake.dark .bar { background: rgba(255,255,255,.05); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .sk { border-radius: 4px; }
+  .fake.light .sk { background: rgba(90,110,140,.15); }
+  .fake.dark .sk { background: rgba(255,255,255,.12); }
+
+  /* ===== 紧凑面板 ===== */
+  .panel {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    width: 1000px; height: 300px; border-radius: 12px;
+    bottom: 26px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 50px rgba(10,15,30,.36), 0 3px 10px rgba(10,15,30,.2);
+  }
+  .light .panel { background: rgba(250,251,253,.8); border: 1px solid rgba(255,255,255,.6);
+    backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); }
+  .dark .panel { background: rgba(38,41,48,.8); border: 1px solid rgba(255,255,255,.12);
+    backdrop-filter: blur(30px) saturate(1.4); -webkit-backdrop-filter: blur(30px) saturate(1.4); }
+
+  .topbar { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; flex: none; }
+  .light .topbar { border-bottom: 1px solid rgba(0,0,0,.07); }
+  .dark .topbar { border-bottom: 1px solid rgba(255,255,255,.08); }
+  .iconbtn { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; }
+  .light .iconbtn { background: rgba(0,0,0,.05); } .dark .iconbtn { background: rgba(255,255,255,.08); }
+
+  .boards { display: flex; gap: 4px; margin-left: 2px; }
+  .chip { display: flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 11px; font-size: 12px; }
+  .light .chip { color: #5a606b; } .dark .chip { color: #9aa3ae; }
+  .chip.active { font-weight: 600; }
+  .light .chip.active { background: rgba(20,90,220,.12); color: #1450c8; }
+  .dark .chip.active { background: rgba(80,140,255,.2); color: #7fb0ff; }
+  .bdot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .shelf { flex: 1; display: flex; gap: 8px; padding: 10px; align-items: stretch; overflow: hidden; }
+  .card {
+    width: 150px; flex: none; border-radius: 8px; padding: 8px;
+    display: flex; flex-direction: column; position: relative;
+    height: 100%;
+  }
+  .light .card { background: rgba(0,0,0,.045); border: 1px solid transparent; }
+  .dark .card { background: rgba(255,255,255,.06); border: 1px solid transparent; }
+  .card.sel { border: 1.5px solid #2f6bff; }
+  .light .card.sel { background: rgba(47,107,255,.10); }
+  .dark .card.sel { background: rgba(70,130,255,.16); }
+  .card.sel::after {
+    content: "↩"; position: absolute; top: 5px; right: 5px;
+    font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px;
+    background: #2f6bff; color: #fff;
+  }
+  .card .head { display: flex; align-items: center; gap: 4px; font-size: 10px; margin-bottom: 5px; }
+  .light .card .head { color: #7a828d; } .dark .card .head { color: #8b95a1; }
+  .card .time { margin-left: auto; font-size: 9.5px; }
+  .card .body { flex: 1; font-size: 11.5px; line-height: 1.4; overflow: hidden; }
+  .light .card .body { color: #23272e; } .dark .card .body { color: #dde3ea; }
+  .card .body .mono { font-family: "SF Mono", Menlo, monospace; font-size: 10px; }
+  .card .body .u { color: #1a63d6; font-weight: 500; } .dark .card .body .u { color: #6ea8ff; }
+  .card .src { font-size: 9.5px; margin-top: 4px; text-align: right; }
+  .light .card .src { color: #9aa2ac; } .dark .card .src { color: #7f8894; }
+  .thumb { height: 44px; border-radius: 5px;
+    background: linear-gradient(135deg, #7fb2ff 0%, #b58cff 55%, #ff9ab0 100%); }
+  .thumb2 { height: 44px; border-radius: 5px; background: #2f6bff; }
+  .code { background: rgba(0,0,0,.05); border-radius: 5px; padding: 5px 6px; }
+  .dark .code { background: rgba(0,0,0,.28); }
+  .code div { font-family: "SF Mono", Menlo, monospace; font-size: 9.5px; line-height: 1.5; white-space: pre; }
+  .c-k { color: #b354d8; } .c-f { color: #2f6bff; } .c-s { color: #1d9d6c; }
+  .dark .c-k { color: #cf8dff; } .dark .c-f { color: #6ea8ff; } .dark .c-s { color: #57d49b; }
+
+  .footer { height: 26px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 12px;
+    font-size: 11px; }
+  .light .footer { border-top: 1px solid rgba(0,0,0,.07); color: #6b7280; }
+  .dark .footer { border-top: 1px solid rgba(255,255,255,.08); color: #96a0ab; }
+  kbd { display: inline-block; padding: 1px 5px; border-radius: 4px; font-size: 10px; font-weight: 600;
+    font-family: inherit; margin-right: 3px; }
+  .light kbd { background: rgba(0,0,0,.07); color: #3a4048; }
+  .dark kbd { background: rgba(255,255,255,.12); color: #cfd6de; }
+  .footer .spacer { flex: 1; }
+
+  .note { position: absolute; font-size: 11.5px; color: #1450c8; background: rgba(255,255,255,.85);
+    padding: 3px 8px; border-radius: 6px; border: 1px dashed #1450c8; }
+  .scene.dark .note { color: #7fb0ff; background: rgba(20,24,30,.85); border-color: #7fb0ff; }
+  .caption { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px;
+    font-size: 12px; letter-spacing: .5px; }
+  .light .caption { color: #7d8794; } .dark .caption { color: #6d7683; }
+</style>
+</head>
+<body>
+
+<!-- 浅色：紧凑布局标注 -->
+<div class="scene light">
+  <div class="fake light" style="left:50px; top:36px; width:400px; height:250px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:12px; display:grid; gap:8px;">
+      <div class="sk" style="width:60%; height:11px"></div>
+      <div class="sk" style="width:82%; height:11px"></div>
+      <div class="sk" style="width:50%; height:11px"></div>
+    </div>
+  </div>
+  <div class="fake light" style="right:60px; top:56px; width:340px; height:210px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:12px; display:grid; gap:8px;">
+      <div class="sk" style="width:55%; height:11px"></div>
+      <div class="sk" style="width:78%; height:11px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="topbar">
+      <div class="iconbtn"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#8b939e" stroke-width="1.6"/><path d="M10.5 10.5 L14.2 14.2" stroke="#8b939e" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="boards">
+        <div class="chip active"><div class="bdot" style="background:#1450c8"></div>剪贴板</div>
+        <div class="chip"><div class="bdot" style="background:#e8a013"></div>工作资料</div>
+        <div class="chip"><div class="bdot" style="background:#1d9d6c"></div>常用链接</div>
+      </div>
+      <div class="iconbtn" style="margin-left:auto"><svg width="12" height="12" viewBox="0 0 24 24" fill="#8b939e"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg></div>
+    </div>
+    <div class="shelf">
+      <div class="card sel">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本<span class="time">3分钟</span></div>
+        <div class="body">你好，这是测试内容，请查收并确认细节后回复…</div>
+        <div class="src">微信</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm7.9 9h-3.4a15 15 0 00-1.2-5.2A8 8 0 0119.9 11z"/></svg>链接<span class="time">18分钟</span></div>
+        <div class="body mono"><span class="u">github.com</span><br>https://github…</div>
+        <div class="src">Safari</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5z"/></svg>文件<span class="time">32分钟</span></div>
+        <div class="body"><b style="font-size:11px">report.xlsx</b><br><span style="opacity:.65; font-size:10px">486 KB</span></div>
+        <div class="src">Finder</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3zm3 10l4-5 3 4 3-3 5 6H6z"/></svg>图片<span class="time">40分钟</span></div>
+        <div class="thumb"></div>
+        <div class="src">Chrome</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 7L5 12l4.5 5 1.4-1.4L7.8 12l3.1-3.6zm5 0L19 12l-4.5 5-1.4-1.4 3.1-3.6-3.1-3.6z"/></svg>代码<span class="time">1小时</span></div>
+        <div class="body"><div class="code"><div><span class="c-k">def</span> <span class="c-f">hello</span>():</div><div>    <span class="c-f">print</span>(<span class="c-s">"hi"</span>)</div></div></div>
+        <div class="src">Xcode</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本<span class="time">2小时</span></div>
+        <div class="body">会议纪要要点：确认排期、物料清单…</div>
+        <div class="src">Notes</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span><kbd>↩</kbd>粘贴到当前应用</span>
+      <span><kbd>⌘C</kbd>复制到剪贴板</span>
+      <span><kbd>⌫</kbd>删除</span>
+      <span><kbd>Esc</kbd>关闭</span>
+      <div class="spacer"></div>
+      <span style="opacity:.6">48 条</span>
+    </div>
+  </div>
+  <div class="note" style="right:30px; top:6px;">紧凑：卡片统一 150pt 宽 · 高度撑满 · 间距 8</div>
+  <div class="caption">浅色 · 面板默认 1000×300（可调、记忆）· 顶栏 34 / 卡片区自适应 / 提示条 26</div>
+</div>
+
+<!-- 深色：同布局 -->
+<div class="scene dark">
+  <div class="fake dark" style="left:80px; top:40px; width:420px; height:240px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:12px; display:grid; gap:8px;">
+      <div class="sk" style="width:58%; height:11px"></div>
+      <div class="sk" style="width:80%; height:11px"></div>
+      <div class="sk" style="width:46%; height:11px"></div>
+    </div>
+  </div>
+  <div class="fake dark" style="right:70px; top:60px; width:350px; height:200px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:12px; display:grid; gap:8px;">
+      <div class="sk" style="width:52%; height:11px"></div>
+      <div class="sk" style="width:75%; height:11px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="topbar">
+      <div class="iconbtn"><svg width="13" height="13" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#8b939e" stroke-width="1.6"/><path d="M10.5 10.5 L14.2 14.2" stroke="#8b939e" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="boards">
+        <div class="chip active"><div class="bdot" style="background:#7fb0ff"></div>剪贴板</div>
+        <div class="chip"><div class="bdot" style="background:#e8a013"></div>工作资料</div>
+        <div class="chip"><div class="bdot" style="background:#1d9d6c"></div>常用链接</div>
+      </div>
+      <div class="iconbtn" style="margin-left:auto"><svg width="12" height="12" viewBox="0 0 24 24" fill="#8b939e"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg></div>
+    </div>
+    <div class="shelf">
+      <div class="card sel">
+        <div class="head">文本<span class="time">3分钟</span></div>
+        <div class="body">你好，这是测试内容，请查收并确认细节后回复…</div>
+        <div class="src">微信</div>
+      </div>
+      <div class="card">
+        <div class="head">链接<span class="time">18分钟</span></div>
+        <div class="body mono"><span class="u">github.com</span><br>https://github…</div>
+        <div class="src">Safari</div>
+      </div>
+      <div class="card">
+        <div class="head">文件<span class="time">32分钟</span></div>
+        <div class="body"><b style="font-size:11px">report.xlsx</b><br><span style="opacity:.65; font-size:10px">486 KB</span></div>
+        <div class="src">Finder</div>
+      </div>
+      <div class="card">
+        <div class="head">图片<span class="time">40分钟</span></div>
+        <div class="thumb2"></div>
+        <div class="src">Chrome</div>
+      </div>
+      <div class="card">
+        <div class="head">代码<span class="time">1小时</span></div>
+        <div class="body"><div class="code"><div><span class="c-k">def</span> <span class="c-f">hello</span>():</div><div>    <span class="c-f">print</span>(<span class="c-s">"hi"</span>)</div></div></div>
+        <div class="src">Xcode</div>
+      </div>
+      <div class="card">
+        <div class="head">文本<span class="time">2小时</span></div>
+        <div class="body">会议纪要要点：确认排期、物料清单…</div>
+        <div class="src">Notes</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span><kbd>↩</kbd>粘贴到当前应用</span>
+      <span><kbd>⌘C</kbd>复制到剪贴板</span>
+      <span><kbd>⌫</kbd>删除</span>
+      <span><kbd>Esc</kbd>关闭</span>
+      <div class="spacer"></div>
+      <span style="opacity:.6">48 条</span>
+    </div>
+  </div>
+  <div class="caption">深色 · 同布局 · 面板高度变化时卡片高度跟随撑满（所有卡片一致）</div>
+</div>
+
+</body>
+</html>

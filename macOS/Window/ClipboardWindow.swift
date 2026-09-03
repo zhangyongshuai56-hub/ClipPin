@@ -6,8 +6,8 @@ import SwiftUI
 final class ClipboardWindow: NSPanel {
     /// 最小内容尺寸（需求 §3）。
     static let minContentSize = NSSize(width: 700, height: 300)
-    /// 默认内容尺寸（需求 §3：1000×420）。
-    static let defaultContentSize = NSSize(width: 1000, height: 420)
+    /// 默认内容尺寸（紧凑化：1000×300）。
+    static let defaultContentSize = NSSize(width: 1000, height: 300)
 
     init(rootView: ClipboardView, contentSize: NSSize) {
         super.init(
