@@ -3,6 +3,18 @@ import ApplicationServices
 import Carbon.HIToolbox
 import os
 
+/// Quick Paste 编排结果；反馈文案由 ViewModel 翻译。
+enum QuickPasteOutcome {
+    /// 已注入 ⌘V 并恢复了用户原剪贴板。
+    case success(targetName: String?)
+    /// 缺少辅助功能权限。
+    case accessibilityDenied
+    /// 内容写入剪贴板失败（调用方的 write 返回 false）。
+    case writeFailed
+    /// 未能完成粘贴：目标缺失 / 激活被拒 / 焦点未落位。
+    case failed
+}
+
 /// Quick Paste 服务（§37、§38）。
 /// 流程：快照用户原剪贴板 → 复制选中项 → 隐藏窗口 → 激活之前的前台应用 →
 /// 合成 ⌘V → 延时恢复用户原剪贴板。无辅助功能权限时由 UI 显式引导，绝不绕过权限机制。
@@ -108,5 +120,28 @@ final class PasteService {
         }
         logger.info("quick paste keystroke sent")
         return true
+    }
+
+    // MARK: - 完整编排
+
+    /// 完整 Quick Paste 编排（§37）：快照原剪贴板 → 写板 → 隐藏窗口 → 激活目标 →
+    /// ⌘V → 延时恢复。内容如何写板（`write`）属于调用方的领域知识；
+    /// 时序、快照恢复与 isBusy 状态全部在此收口。
+    func runQuickPaste(write: () -> Bool, hideWindow: () -> Void) async -> QuickPasteOutcome {
+        guard isAccessibilityTrusted else { return .accessibilityDenied }
+        let snapshot = captureCurrentContents()
+        guard write() else { return .writeFailed }
+        isBusy = true
+        defer { isBusy = false }
+        let pasted = await pasteToPreviousApp(hideWindow: hideWindow)
+        guard pasted else {
+            // 失败也必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
+            restore(snapshot)
+            return .failed
+        }
+        // 确保目标 App 读取完成后再恢复原剪贴板（需求 §14）
+        try? await Task.sleep(for: .milliseconds(600))
+        restore(snapshot)
+        return .success(targetName: previousAppName)
     }
 }

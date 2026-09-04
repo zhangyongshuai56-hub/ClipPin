@@ -156,6 +156,9 @@ Phase 13 已完成（UI 打磨）：
 - 可靠性：数据库初始化失败改为弹窗可见；删除文件夹改单事务；schema v3 为 content_hash 加唯一索引（迁移自动清理历史重复行）；列表并发加载只让最新结果生效
 - 分类器：移除 "?" 特征词，普通问句不再误判为 Swift 代码
 - 隐私设置：内置排除应用补充 密码.app / KeePassXC / Bitwarden
+- 渲染：列表缩略图改用 ImageIO 按显示尺寸下采样解码（不再整图载入内存），缓存占用按实际解码字节计
+- 交互：输入法组词中 Enter / Esc 交还输入法，候选确认不再误触粘贴或清空搜索
+- 架构：Quick Paste 编排（快照 / 激活 / ⌘V / 恢复）收口到 PasteService，ViewModel 经构造注入依赖
 
 ## Paste 式底部面板（交互升级，见 design/panel-preview.png）
 

@@ -107,7 +107,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     // MARK: - 创建与 delegate
 
     private func makeClipboardWindow(repository: ClipboardRepository, contentSize: NSSize) -> ClipboardWindow {
-        let viewModel = ClipboardViewModel(repository: repository)
+        let viewModel = ClipboardViewModel(repository: repository, pasteService: .shared)
         self.viewModel = viewModel
         let window = ClipboardWindow(rootView: ClipboardView(viewModel: viewModel), contentSize: contentSize)
         window.delegate = self

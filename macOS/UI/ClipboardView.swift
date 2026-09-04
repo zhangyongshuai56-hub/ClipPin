@@ -335,7 +335,10 @@ struct ClipboardView: View {
         // 搜索框等文本编辑获得焦点时，编辑键（Backspace / ←→ / ⌘C / 字符输入）
         // 必须交还给 field editor，否则 Backspace 会误删选中的剪贴板条目。
         // 只保留 Enter 与 Esc 的面板级语义。
-        if window.firstResponder is NSTextView {
+        if let textView = window.firstResponder as? NSTextView {
+            // 输入法组词中（marked text）：候选确认的 Enter、取消组合的 Esc
+            // 都属于输入法交互，必须整体放行，否则会误触粘贴 / 清空搜索
+            guard !textView.hasMarkedText() else { return event }
             switch event.keyCode {
             case 36, 76: // Enter：默认操作；⌘Enter：始终粘贴到当前应用
                 guard let entry = viewModel.selectedEntry else { return event }

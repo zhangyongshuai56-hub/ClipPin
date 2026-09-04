@@ -53,8 +53,7 @@ final class ClipboardViewModel {
     }
 
     // MARK: - 粘贴默认操作（需求：设置界面可选）
-
-    var defaultAction: DefaultPasteAction = PasteSettings.defaultAction
+    // 真相来源是 PasteSettings（UserDefaults）；操作时直接读取，VM 不另存副本。
 
     // MARK: - 搜索
 
@@ -67,7 +66,6 @@ final class ClipboardViewModel {
 
     private var searchTask: Task<Void, Never>?
     private var monitorCancellable: AnyCancellable?
-    private var defaultsObserver: NSObjectProtocol?
     /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
 
@@ -80,9 +78,11 @@ final class ClipboardViewModel {
     private let pageSize = 50
 
     private let repository: ClipboardRepository
+    private let pasteService: PasteService
 
-    init(repository: ClipboardRepository) {
+    init(repository: ClipboardRepository, pasteService: PasteService) {
         self.repository = repository
+        self.pasteService = pasteService
         // 监听器入库新内容后刷新列表（防抖合并连续捕获）
         monitorCancellable = NotificationCenter.default
             .publisher(for: .clipboardMonitorDidSaveItem)
@@ -90,18 +90,6 @@ final class ClipboardViewModel {
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }
-        // 设置变更即时反映（默认操作 / 纯文本开关）
-        defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                // 注意：这里只读偏好；若再写回 UserDefaults 会触发无限递归
-                guard let self, self.defaultAction != PasteSettings.defaultAction else { return }
-                self.defaultAction = PasteSettings.defaultAction
-            }
-        }
     }
 
     // MARK: - 加载
@@ -250,34 +238,32 @@ final class ClipboardViewModel {
     }
 
     /// 操作 A：粘贴到当前活动应用（需求 §9、§12）。
-    /// 快照原剪贴板 → 复制 → 隐藏面板 → 激活之前的应用 → ⌘V → 恢复原剪贴板。
+    /// 编排（快照 / 写板 / 激活 / ⌘V / 恢复）收口在 PasteService；
+    /// 这里只准备内容、翻译结果为 UI 反馈。
     func pasteToActiveApplication(_ entry: ClipboardEntry) async {
-        guard PasteService.shared.isAccessibilityTrusted else {
+        guard pasteService.isAccessibilityTrusted else {
             showAccessibilityPrompt = true
             return
         }
-        let snapshot = PasteService.shared.captureCurrentContents()
-        guard writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) else { return }
-
         showFeedback(.pasting, autoClearAfter: nil)
-        PasteService.shared.isBusy = true
-        let pasted = await PasteService.shared.pasteToPreviousApp {
+        let outcome = await pasteService.runQuickPaste(
+            write: { writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) },
+            hideWindow: { WindowManager.shared.hideClipboardWindow() }
+        )
+        switch outcome {
+        case .success(let targetName):
+            showFeedback(.pasted(targetName ?? "当前应用"), autoClearAfter: .seconds(1))
+            // 让目标应用完成粘贴后再收面板
+            try? await Task.sleep(for: .milliseconds(900))
             WindowManager.shared.hideClipboardWindow()
-        }
-        guard pasted else {
-            PasteService.shared.isBusy = false
-            // 失败也必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
-            PasteService.shared.restore(snapshot)
+        case .accessibilityDenied:
+            showAccessibilityPrompt = true
+        case .writeFailed:
+            // writeToPasteboard 已设置 errorMessage，撤掉「粘贴中」
+            showFeedback(.idle, autoClearAfter: nil)
+        case .failed:
             showFeedback(.failed("无法粘贴到当前应用"), autoClearAfter: .seconds(3))
-            return
         }
-        // 确保目标 App 读取完成后再恢复原剪贴板（需求 §14）
-        try? await Task.sleep(for: .milliseconds(600))
-        PasteService.shared.restore(snapshot)
-        PasteService.shared.isBusy = false
-        showFeedback(.pasted(PasteService.shared.previousAppName ?? "当前应用"), autoClearAfter: .seconds(1))
-        try? await Task.sleep(for: .milliseconds(900))
-        WindowManager.shared.hideClipboardWindow()
     }
 
     /// 操作 B：复制到系统剪贴板（需求 §10）。不需要 Accessibility，不执行 ⌘V。

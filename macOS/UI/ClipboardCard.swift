@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 /// 面板卡片（需求 §2、§11）：内容预览 + 类型/来源 + 时间；选中态显示「↩ 粘贴」角标。
@@ -118,6 +119,8 @@ struct ClipboardCard: View {
 
 /// 缩略图内存缓存（§57、§83）：网格滚动时行会反复重绘，
 /// NSCache 避免重复磁盘 IO，并在内存压力下自动逐出。
+/// 解码经 ImageIO 按目标尺寸下采样：一张 4K 截屏在 52pt 卡片里
+/// 只需 ~320px 位图的内存，而不是整图；cost 按实际解码字节计，totalCostLimit 才真实生效。
 @MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
@@ -129,14 +132,43 @@ final class ThumbnailCache {
         cache.totalCostLimit = 64 * 1024 * 1024
     }
 
-    func image(for path: String) -> NSImage? {
-        if let cached = cache.object(forKey: path as NSString) {
+    /// 加载最长边不超过 `maxPixel` 的下采样位图。
+    /// 缓存键带尺寸：同一路径可能以不同目标尺寸出现。
+    func image(for path: String, maxPixel: CGFloat) -> NSImage? {
+        let key = "\(path)#\(Int(maxPixel))" as NSString
+        if let cached = cache.object(forKey: key) {
             return cached
         }
-        guard let image = NSImage(contentsOfFile: path) else { return nil }
-        let cost = Int(image.size.width * image.size.height * 4)
-        cache.setObject(image, forKey: path as NSString, cost: cost)
+        guard let image = Self.downsampledImage(path: path, maxPixel: maxPixel) else {
+            return nil
+        }
+        cache.setObject(image, forKey: key, cost: image.decodedByteSize)
         return image
+    }
+
+    /// ImageIO 下采样解码：读元数据算缩放比，只解码目标尺寸一次。
+    private static func downsampledImage(path: String, maxPixel: CGFloat) -> NSImage? {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+}
+
+private extension NSImage {
+    /// 解码后位图的内存占用，供 NSCache cost 使用。
+    var decodedByteSize: Int {
+        guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return 0 }
+        return cgImage.bytesPerRow * cgImage.height
     }
 }
 
@@ -147,11 +179,13 @@ final class ThumbnailCache {
 struct ThumbnailImage: View {
     let path: String?
     let side: CGFloat
+    /// 下采样目标（最长边像素，含 Retina 倍率）；默认与 Core 侧缩略图标准一致。
+    var maxPixel: CGFloat = 320
 
     var body: some View {
         Color.clear
             .overlay {
-                if let path, let image = ThumbnailCache.shared.image(for: path) {
+                if let path, let image = ThumbnailCache.shared.image(for: path, maxPixel: maxPixel) {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFill()

@@ -296,6 +296,9 @@ enum DefaultPasteAction: String, CaseIterable, Sendable {
     }
 }
 
+/// 粘贴项目设置（需求：默认操作 + 纯文本开关）。
+/// 读取经这里；写入走 SettingsView 的 @AppStorage（同一个 UserDefaults 键），
+/// 两侧共享键名，不另设 setter，避免双份真相。
 enum PasteSettings {
     static let defaultActionKey = "defaultPasteAction"
     static let plainTextKey = "pastePlainText"
@@ -306,16 +309,8 @@ enum PasteSettings {
             ?? .activeApp
     }
 
-    static func setDefaultAction(_ action: DefaultPasteAction) {
-        UserDefaults.standard.set(action.rawValue, forKey: defaultActionKey)
-    }
-
     /// 始终以纯文本粘贴。
     static var alwaysPlainText: Bool {
         UserDefaults.standard.bool(forKey: plainTextKey)
-    }
-
-    static func setAlwaysPlainText(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: plainTextKey)
     }
 }
