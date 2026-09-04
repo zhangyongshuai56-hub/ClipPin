@@ -56,17 +56,6 @@ struct ClipboardCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
         }
-        .overlay(alignment: .topTrailing) {
-            if isSelected {
-                Text("↩ 粘贴")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2.5)
-                    .background(Color.accentColor, in: Capsule())
-                    .foregroundStyle(.white)
-                    .padding(6)
-            }
-        }
         .onHover { isHovered = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.itemType.title)，\(entry.preview ?? entry.title ?? "")")
