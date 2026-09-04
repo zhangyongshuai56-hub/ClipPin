@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(AidoPasteCoreFFI)
-import AidoPasteCoreFFI
+#if canImport(PasteCoreFFI)
+import PasteCoreFFI
 #endif
 
 fileprivate extension RustBuffer {
@@ -25,13 +25,13 @@ fileprivate extension RustBuffer {
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
-        try! rustCall { ffi_aidopaste_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
+        try! rustCall { ffi_paste_core_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
     func deallocate() {
-        try! rustCall { ffi_aidopaste_core_rustbuffer_free(self, $0) }
+        try! rustCall { ffi_paste_core_rustbuffer_free(self, $0) }
     }
 }
 
@@ -327,7 +327,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureAidopasteCoreInitialized()
+    uniffiEnsurePasteCoreInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -570,7 +570,7 @@ fileprivate struct FfiConverterString: FfiConverter {
 /**
  * 数据库入口对象（§54）。Swift 启动时创建一个实例并长期持有。
  */
-public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
+public protocol PasteDatabaseProtocol: AnyObject, Sendable {
     
     /**
      * 执行一次过期清理（§32）。
@@ -686,7 +686,7 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
 /**
  * 数据库入口对象（§54）。Swift 启动时创建一个实例并长期持有。
  */
-open class AidoPasteDatabase: AidoPasteDatabaseProtocol, @unchecked Sendable {
+open class PasteDatabase: PasteDatabaseProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -723,7 +723,7 @@ open class AidoPasteDatabase: AidoPasteDatabaseProtocol, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_aidopaste_core_fn_clone_aidopastedatabase(self.handle, $0) }
+        return try! rustCall { uniffi_paste_core_fn_clone_pastedatabase(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -733,17 +733,17 @@ open class AidoPasteDatabase: AidoPasteDatabaseProtocol, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_aidopaste_core_fn_free_aidopastedatabase(handle, $0) }
+        try! rustCall { uniffi_paste_core_fn_free_pastedatabase(handle, $0) }
     }
 
     
     /**
      * 打开（或创建）指定路径的数据库。
      */
-public static func `open`(path: String)throws  -> AidoPasteDatabase  {
-    return try  FfiConverterTypeAidoPasteDatabase_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+public static func `open`(path: String)throws  -> PasteDatabase  {
+    return try  FfiConverterTypePasteDatabase_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_constructor_aidopastedatabase_open(
+    uniffi_paste_core_fn_constructor_pastedatabase_open(
         FfiConverterString.lower(path),uniffiCallStatus
     )
 })
@@ -752,10 +752,10 @@ public static func `open`(path: String)throws  -> AidoPasteDatabase  {
     /**
      * 内存数据库，供 Swift 单元测试使用。
      */
-public static func openInMemory()throws  -> AidoPasteDatabase  {
-    return try  FfiConverterTypeAidoPasteDatabase_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+public static func openInMemory()throws  -> PasteDatabase  {
+    return try  FfiConverterTypePasteDatabase_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_constructor_aidopastedatabase_open_in_memory(uniffiCallStatus
+    uniffi_paste_core_fn_constructor_pastedatabase_open_in_memory(uniffiCallStatus
     )
 })
 }
@@ -766,9 +766,9 @@ public static func openInMemory()throws  -> AidoPasteDatabase  {
      * 执行一次过期清理（§32）。
      */
 open func cleanupExpired(retention: Retention)throws  -> Int64  {
-    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_cleanup_expired(
+    uniffi_paste_core_fn_method_pastedatabase_cleanup_expired(
             self.uniffiCloneHandle(),
         FfiConverterTypeRetention_lower(retention),uniffiCallStatus
     )
@@ -779,9 +779,9 @@ open func cleanupExpired(retention: Retention)throws  -> Int64  {
      * 创建 Pinboard 文件夹。
      */
 open func createBoard(name: String, color: String)throws  -> Board  {
-    return try  FfiConverterTypeBoard_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeBoard_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_create_board(
+    uniffi_paste_core_fn_method_pastedatabase_create_board(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(name),
         FfiConverterString.lower(color),uniffiCallStatus
@@ -793,9 +793,9 @@ open func createBoard(name: String, color: String)throws  -> Board  {
      * 创建条目（自动去重，§17）。
      */
 open func createItem(newItem: NewClipboardItem)throws  -> ClipboardItem  {
-    return try  FfiConverterTypeClipboardItem_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeClipboardItem_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_create_item(
+    uniffi_paste_core_fn_method_pastedatabase_create_item(
             self.uniffiCloneHandle(),
         FfiConverterTypeNewClipboardItem_lower(newItem),uniffiCallStatus
     )
@@ -805,9 +805,9 @@ open func createItem(newItem: NewClipboardItem)throws  -> ClipboardItem  {
     /**
      * 删除文件夹（其中条目回到默认「剪贴板」）。
      */
-open func deleteBoard(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func deleteBoard(id: Int64)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_delete_board(
+    uniffi_paste_core_fn_method_pastedatabase_delete_board(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -817,9 +817,9 @@ open func deleteBoard(id: Int64)throws   {try rustCallWithError(FfiConverterType
     /**
      * 删除单条（物理删除，含图片产物；文件夹视图内删除用这个）。
      */
-open func deleteItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func deleteItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_delete_item(
+    uniffi_paste_core_fn_method_pastedatabase_delete_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -830,9 +830,9 @@ open func deleteItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeA
      * 批量删除，返回实际删除数。
      */
 open func deleteItems(ids: [Int64])throws  -> Int64  {
-    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_delete_items(
+    uniffi_paste_core_fn_method_pastedatabase_delete_items(
             self.uniffiCloneHandle(),
         FfiConverterSequenceInt64.lower(ids),uniffiCallStatus
     )
@@ -843,9 +843,9 @@ open func deleteItems(ids: [Int64])throws  -> Int64  {
      * 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
      */
 open func editTextItem(id: Int64, newText: String)throws  -> EditOutcome  {
-    return try  FfiConverterTypeEditOutcome_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeEditOutcome_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_edit_text_item(
+    uniffi_paste_core_fn_method_pastedatabase_edit_text_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),
         FfiConverterString.lower(newText),uniffiCallStatus
@@ -857,9 +857,9 @@ open func editTextItem(id: Int64, newText: String)throws  -> EditOutcome  {
      * 历史条数上限（§50），返回清理条数。
      */
 open func enforceHistoryLimit(maxCount: Int64)throws  -> Int64  {
-    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_enforce_history_limit(
+    uniffi_paste_core_fn_method_pastedatabase_enforce_history_limit(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(maxCount),uniffiCallStatus
     )
@@ -870,9 +870,9 @@ open func enforceHistoryLimit(maxCount: Int64)throws  -> Int64  {
      * 读取单条。
      */
 open func getItem(id: Int64)throws  -> ClipboardItem  {
-    return try  FfiConverterTypeClipboardItem_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeClipboardItem_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_get_item(
+    uniffi_paste_core_fn_method_pastedatabase_get_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -883,9 +883,9 @@ open func getItem(id: Int64)throws  -> ClipboardItem  {
      * 分页列出：置顶在前，其余按最近使用排序。
      */
 open func getItems(filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
-    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_get_items(
+    uniffi_paste_core_fn_method_pastedatabase_get_items(
             self.uniffiCloneHandle(),
         FfiConverterOptionTypeItemType.lower(filter),
         FfiConverterOptionInt64.lower(boardId),
@@ -899,9 +899,9 @@ open func getItems(filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int
      * 置顶条目。
      */
 open func getPinnedItems(limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
-    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_get_pinned_items(
+    uniffi_paste_core_fn_method_pastedatabase_get_pinned_items(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(limit),
         FfiConverterInt64.lower(offset),uniffiCallStatus
@@ -913,9 +913,9 @@ open func getPinnedItems(limit: Int64, offset: Int64)throws  -> [ClipboardItem] 
      * 统计信息。
      */
 open func getStatistics()throws  -> Statistics  {
-    return try  FfiConverterTypeStatistics_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeStatistics_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_get_statistics(
+    uniffi_paste_core_fn_method_pastedatabase_get_statistics(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -925,9 +925,9 @@ open func getStatistics()throws  -> Statistics  {
      * 全部文件夹。
      */
 open func listBoards()throws  -> [Board]  {
-    return try  FfiConverterSequenceTypeBoard.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterSequenceTypeBoard.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_list_boards(
+    uniffi_paste_core_fn_method_pastedatabase_list_boards(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -936,9 +936,9 @@ open func listBoards()throws  -> [Board]  {
     /**
      * Pin（§31）。
      */
-open func pinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func pinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_pin_item(
+    uniffi_paste_core_fn_method_pastedatabase_pin_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -949,9 +949,9 @@ open func pinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAido
      * 从「剪贴板」历史移除条目：未收藏物理删除；已收藏软删除、保留在文件夹中。
      */
 open func removeItemFromHistory(id: Int64)throws  -> RemovalOutcome  {
-    return try  FfiConverterTypeRemovalOutcome_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterTypeRemovalOutcome_lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_remove_item_from_history(
+    uniffi_paste_core_fn_method_pastedatabase_remove_item_from_history(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -961,9 +961,9 @@ open func removeItemFromHistory(id: Int64)throws  -> RemovalOutcome  {
     /**
      * 重命名文件夹。
      */
-open func renameBoard(id: Int64, name: String)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func renameBoard(id: Int64, name: String)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_rename_board(
+    uniffi_paste_core_fn_method_pastedatabase_rename_board(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),
         FfiConverterString.lower(name),uniffiCallStatus
@@ -974,9 +974,9 @@ open func renameBoard(id: Int64, name: String)throws   {try rustCallWithError(Ff
     /**
      * 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
      */
-open func renameItem(id: Int64, title: String)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func renameItem(id: Int64, title: String)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_rename_item(
+    uniffi_paste_core_fn_method_pastedatabase_rename_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),
         FfiConverterString.lower(title),uniffiCallStatus
@@ -988,9 +988,9 @@ open func renameItem(id: Int64, title: String)throws   {try rustCallWithError(Ff
      * 当前 schema 版本。
      */
 open func schemaVersion()throws  -> UInt32  {
-    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_schema_version(
+    uniffi_paste_core_fn_method_pastedatabase_schema_version(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1000,9 +1000,9 @@ open func schemaVersion()throws  -> UInt32  {
      * 全文搜索（§29、§30）。
      */
 open func searchItems(query: String, filter: ItemType?, boardId: Int64?, limit: Int64, offset: Int64)throws  -> [ClipboardItem]  {
-    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterSequenceTypeClipboardItem.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_search_items(
+    uniffi_paste_core_fn_method_pastedatabase_search_items(
             self.uniffiCloneHandle(),
         FfiConverterString.lower(query),
         FfiConverterOptionTypeItemType.lower(filter),
@@ -1016,9 +1016,9 @@ open func searchItems(query: String, filter: ItemType?, boardId: Int64?, limit: 
     /**
      * 把条目移入 / 移出文件夹（None = 移回默认「剪贴板」）。
      */
-open func setItemBoard(id: Int64, boardId: Int64?)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func setItemBoard(id: Int64, boardId: Int64?)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_set_item_board(
+    uniffi_paste_core_fn_method_pastedatabase_set_item_board(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),
         FfiConverterOptionInt64.lower(boardId),uniffiCallStatus
@@ -1030,9 +1030,9 @@ open func setItemBoard(id: Int64, boardId: Int64?)throws   {try rustCallWithErro
      * 清扫孤儿图片文件（§48），返回删除数。
      */
 open func sweepOrphanArtifacts()throws  -> Int64  {
-    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+    return try  FfiConverterInt64.lift(try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_sweep_orphan_artifacts(
+    uniffi_paste_core_fn_method_pastedatabase_sweep_orphan_artifacts(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
@@ -1041,9 +1041,9 @@ open func sweepOrphanArtifacts()throws  -> Int64  {
     /**
      * Unpin（§31）。
      */
-open func unpinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+open func unpinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
         uniffiCallStatus in
-    uniffi_aidopaste_core_fn_method_aidopastedatabase_unpin_item(
+    uniffi_paste_core_fn_method_pastedatabase_unpin_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
     )
@@ -1058,24 +1058,24 @@ open func unpinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAi
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeAidoPasteDatabase: FfiConverter {
+public struct FfiConverterTypePasteDatabase: FfiConverter {
     typealias FfiType = UInt64
-    typealias SwiftType = AidoPasteDatabase
+    typealias SwiftType = PasteDatabase
 
-    public static func lift(_ handle: UInt64) throws -> AidoPasteDatabase {
-        return AidoPasteDatabase(unsafeFromHandle: handle)
+    public static func lift(_ handle: UInt64) throws -> PasteDatabase {
+        return PasteDatabase(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: AidoPasteDatabase) -> UInt64 {
+    public static func lower(_ value: PasteDatabase) -> UInt64 {
         return value.uniffiCloneHandle()
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AidoPasteDatabase {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasteDatabase {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: AidoPasteDatabase, into buf: inout [UInt8]) {
+    public static func write(_ value: PasteDatabase, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1084,15 +1084,15 @@ public struct FfiConverterTypeAidoPasteDatabase: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeAidoPasteDatabase_lift(_ handle: UInt64) throws -> AidoPasteDatabase {
-    return try FfiConverterTypeAidoPasteDatabase.lift(handle)
+public func FfiConverterTypePasteDatabase_lift(_ handle: UInt64) throws -> PasteDatabase {
+    return try FfiConverterTypePasteDatabase.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeAidoPasteDatabase_lower(_ value: AidoPasteDatabase) -> UInt64 {
-    return FfiConverterTypeAidoPasteDatabase.lower(value)
+public func FfiConverterTypePasteDatabase_lower(_ value: PasteDatabase) -> UInt64 {
+    return FfiConverterTypePasteDatabase.lower(value)
 }
 
 
@@ -1581,146 +1581,6 @@ public func FfiConverterTypeTypeCount_lower(_ value: TypeCount) -> RustBuffer {
 
 
 /**
- * 核心错误（§82）。UniFFI 会把它映射为 Swift 的 Error 枚举。
- */
-public 
-enum AidoPasteError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
-
-    
-    
-    case Database(message: String
-    )
-    case Storage(message: String
-    )
-    case InvalidInput(message: String
-    )
-    case NotFound(id: Int64
-    )
-    case PermissionDenied(message: String
-    )
-    case FileSystem(message: String
-    )
-    case Migration(target: UInt32, message: String
-    )
-
-    
-
-    
-
-    
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
-    
-}
-
-#if compiler(>=6)
-extension AidoPasteError: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAidoPasteError: FfiConverterRustBuffer {
-    typealias SwiftType = AidoPasteError
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AidoPasteError {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-
-        
-
-        
-        case 1: return .Database(
-            message: try FfiConverterString.read(from: &buf)
-            )
-        case 2: return .Storage(
-            message: try FfiConverterString.read(from: &buf)
-            )
-        case 3: return .InvalidInput(
-            message: try FfiConverterString.read(from: &buf)
-            )
-        case 4: return .NotFound(
-            id: try FfiConverterInt64.read(from: &buf)
-            )
-        case 5: return .PermissionDenied(
-            message: try FfiConverterString.read(from: &buf)
-            )
-        case 6: return .FileSystem(
-            message: try FfiConverterString.read(from: &buf)
-            )
-        case 7: return .Migration(
-            target: try FfiConverterUInt32.read(from: &buf), 
-            message: try FfiConverterString.read(from: &buf)
-            )
-
-         default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: AidoPasteError, into buf: inout [UInt8]) {
-        switch value {
-
-        
-
-        
-        
-        case let .Database(message):
-            writeInt(&buf, Int32(1))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .Storage(message):
-            writeInt(&buf, Int32(2))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .InvalidInput(message):
-            writeInt(&buf, Int32(3))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .NotFound(id):
-            writeInt(&buf, Int32(4))
-            FfiConverterInt64.write(id, into: &buf)
-            
-        
-        case let .PermissionDenied(message):
-            writeInt(&buf, Int32(5))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .FileSystem(message):
-            writeInt(&buf, Int32(6))
-            FfiConverterString.write(message, into: &buf)
-            
-        
-        case let .Migration(target,message):
-            writeInt(&buf, Int32(7))
-            FfiConverterUInt32.write(target, into: &buf)
-            FfiConverterString.write(message, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAidoPasteError_lift(_ buf: RustBuffer) throws -> AidoPasteError {
-    return try FfiConverterTypeAidoPasteError.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAidoPasteError_lower(_ value: AidoPasteError) -> RustBuffer {
-    return FfiConverterTypeAidoPasteError.lower(value)
-}
-
-
-/**
  * 剪贴板条目类型（§13）。
  */
 
@@ -1829,6 +1689,146 @@ public func FfiConverterTypeItemType_lower(_ value: ItemType) -> RustBuffer {
     return FfiConverterTypeItemType.lower(value)
 }
 
+
+
+/**
+ * 核心错误（§82）。UniFFI 会把它映射为 Swift 的 Error 枚举。
+ */
+public 
+enum PasteError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    case Database(message: String
+    )
+    case Storage(message: String
+    )
+    case InvalidInput(message: String
+    )
+    case NotFound(id: Int64
+    )
+    case PermissionDenied(message: String
+    )
+    case FileSystem(message: String
+    )
+    case Migration(target: UInt32, message: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension PasteError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePasteError: FfiConverterRustBuffer {
+    typealias SwiftType = PasteError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PasteError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Database(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .Storage(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .InvalidInput(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .NotFound(
+            id: try FfiConverterInt64.read(from: &buf)
+            )
+        case 5: return .PermissionDenied(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 6: return .FileSystem(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .Migration(
+            target: try FfiConverterUInt32.read(from: &buf), 
+            message: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PasteError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Database(message):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Storage(message):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .InvalidInput(message):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .NotFound(id):
+            writeInt(&buf, Int32(4))
+            FfiConverterInt64.write(id, into: &buf)
+            
+        
+        case let .PermissionDenied(message):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .FileSystem(message):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .Migration(target,message):
+            writeInt(&buf, Int32(7))
+            FfiConverterUInt32.write(target, into: &buf)
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasteError_lift(_ buf: RustBuffer) throws -> PasteError {
+    return try FfiConverterTypePasteError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePasteError_lower(_ value: PasteError) -> RustBuffer {
+    return FfiConverterTypePasteError.lower(value)
+}
 
 
 /**
@@ -2178,80 +2178,80 @@ private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
-    let scaffolding_contract_version = ffi_aidopaste_core_uniffi_contract_version()
+    let scaffolding_contract_version = ffi_paste_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_cleanup_expired() != 31551) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_cleanup_expired() != 32249) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_create_board() != 37905) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_create_board() != 56823) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_create_item() != 62334) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_create_item() != 28913) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_board() != 31403) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_delete_board() != 53969) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_item() != 48317) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_delete_item() != 3583) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_items() != 18760) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_delete_items() != 32034) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_edit_text_item() != 25178) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_edit_text_item() != 9550) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_enforce_history_limit() != 26802) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_enforce_history_limit() != 52276) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_item() != 60379) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_get_item() != 19762) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_items() != 24775) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_get_items() != 48853) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_pinned_items() != 23763) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_get_pinned_items() != 24062) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_get_statistics() != 53924) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_get_statistics() != 63939) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_list_boards() != 57174) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_list_boards() != 64841) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_pin_item() != 23454) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_pin_item() != 31731) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_remove_item_from_history() != 19420) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_remove_item_from_history() != 45788) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_rename_board() != 64370) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_rename_board() != 62683) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_rename_item() != 35706) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_rename_item() != 18008) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_schema_version() != 53774) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_schema_version() != 56849) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_search_items() != 11447) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_search_items() != 14297) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_set_item_board() != 37799) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_set_item_board() != 32248) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_sweep_orphan_artifacts() != 60357) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_sweep_orphan_artifacts() != 53936) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_unpin_item() != 48318) {
+    if (uniffi_paste_core_checksum_method_pastedatabase_unpin_item() != 41720) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_constructor_aidopastedatabase_open() != 46334) {
+    if (uniffi_paste_core_checksum_constructor_pastedatabase_open() != 1734) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_constructor_aidopastedatabase_open_in_memory() != 41135) {
+    if (uniffi_paste_core_checksum_constructor_pastedatabase_open_in_memory() != 4194) {
         return InitializationResult.apiChecksumMismatch
     }
 
@@ -2260,7 +2260,7 @@ private let initializationResult: InitializationResult = {
 
 // Make the ensure init function public so that other modules which have external type references to
 // our types can call it.
-public func uniffiEnsureAidopasteCoreInitialized() {
+public func uniffiEnsurePasteCoreInitialized() {
     switch initializationResult {
     case .ok:
         break

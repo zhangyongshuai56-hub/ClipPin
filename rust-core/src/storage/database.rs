@@ -17,7 +17,7 @@ use crate::clipboard::model::{
     Board, ClipboardItem, EditOutcome, ItemType, NewClipboardItem, RemovalOutcome, Statistics,
     now_ms,
 };
-use crate::error::{AidoPasteError, Result};
+use crate::error::{PasteError, Result};
 use crate::storage::image_store::ImageStore;
 
 /// 条目图片产物路径（删除条目时同步清理文件，§32）。
@@ -135,7 +135,7 @@ pub struct Database {
 impl Database {
     /// 打开（或创建）数据库文件。
     /// 存储根目录默认取数据库文件的祖父目录（§20：
-    /// `.../AidoPaste/Database/clipboard.db` → `.../AidoPaste`）。
+    /// `.../Paste/Database/clipboard.db` → `.../Paste`）。
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let storage_root = derive_storage_root(path);
@@ -154,7 +154,7 @@ impl Database {
         let conn = Connection::open_in_memory()?;
         let sequence = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let storage_root = std::env::temp_dir().join(format!(
-            "aidopaste-images-{}-{sequence}",
+            "paste-images-{}-{sequence}",
             std::process::id()
         ));
         Self::initialize(conn, ImageStore::open(&storage_root)?)
@@ -163,7 +163,7 @@ impl Database {
     fn initialize(mut conn: Connection, image_store: ImageStore) -> Result<Self> {
         let journal_mode: String =
             conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
-        log::debug!(target: "aidopaste", "journal_mode={journal_mode}");
+        log::debug!(target: "paste", "journal_mode={journal_mode}");
         // WAL + NORMAL：崩溃不丢已提交事务，写入开销低（§48）
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
@@ -177,7 +177,7 @@ impl Database {
     fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>> {
         self.conn
             .lock()
-            .map_err(|_| AidoPasteError::Storage("database connection lock poisoned".into()))
+            .map_err(|_| PasteError::Storage("database connection lock poisoned".into()))
     }
 
     /// 当前 schema 版本。
@@ -260,7 +260,7 @@ impl Database {
         };
         tx.commit()?;
         // §84：日志只允许 type / size / id 等元信息，禁止内容原文
-        log::info!(target: "aidopaste", "item captured id={id} type={} size={}", effective.item_type.as_str(), resolved.content_size);
+        log::info!(target: "paste", "item captured id={id} type={} size={}", effective.item_type.as_str(), resolved.content_size);
         drop(conn);
         self.get_item(id)
     }
@@ -274,7 +274,7 @@ impl Database {
             row_to_item,
         )
         .optional()?
-        .ok_or(AidoPasteError::NotFound(id))
+        .ok_or(PasteError::NotFound(id))
     }
 
     /// 分页列出（§58）：置顶在前，其余按最近使用排序。
@@ -302,7 +302,7 @@ impl Database {
             row_to_item,
         )?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(AidoPasteError::from)
+            .map_err(PasteError::from)
     }
 
     /// 全文搜索（§29、§30）。空查询等价于 [`Database::get_items`]。
@@ -331,14 +331,14 @@ impl Database {
         let artifacts = fetch_artifacts(&conn, std::slice::from_ref(&id))?;
         let affected = conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         drop(conn);
         for (image_path, thumbnail_path) in artifacts {
             self.image_store
                 .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
-        log::info!(target: "aidopaste", "item deleted id={id}");
+        log::info!(target: "paste", "item deleted id={id}");
         Ok(())
     }
 
@@ -365,7 +365,7 @@ impl Database {
                 .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
         if deleted > 0 {
-            log::info!(target: "aidopaste", "items deleted count={deleted}");
+            log::info!(target: "paste", "items deleted count={deleted}");
         }
         Ok(deleted)
     }
@@ -393,7 +393,7 @@ impl Database {
             )
             .optional()?;
         let Some(board_id) = board_id else {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         };
         if board_id.is_some() {
             conn.execute(
@@ -401,7 +401,7 @@ impl Database {
                  SET removed_from_history = 1, is_pinned = 0 WHERE id = ?1",
                 params![id],
             )?;
-            log::info!(target: "aidopaste", "item soft-removed id={id}");
+            log::info!(target: "paste", "item soft-removed id={id}");
             return Ok(RemovalOutcome::KeptInBoard);
         }
         let artifacts = fetch_artifacts(&conn, std::slice::from_ref(&id))?;
@@ -411,7 +411,7 @@ impl Database {
             self.image_store
                 .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
-        log::info!(target: "aidopaste", "item deleted id={id}");
+        log::info!(target: "paste", "item deleted id={id}");
         Ok(RemovalOutcome::Deleted)
     }
 
@@ -422,7 +422,7 @@ impl Database {
     pub fn edit_text_item(&self, id: i64, new_text: &str) -> Result<EditOutcome> {
         let text = new_text.trim();
         if text.is_empty() {
-            return Err(AidoPasteError::InvalidInput(
+            return Err(PasteError::InvalidInput(
                 "edited text must not be empty".into(),
             ));
         }
@@ -434,12 +434,12 @@ impl Database {
                 row_to_item,
             )
             .optional()?
-            .ok_or(AidoPasteError::NotFound(id))?;
+            .ok_or(PasteError::NotFound(id))?;
         if !matches!(
             existing.item_type,
             ItemType::Text | ItemType::Url | ItemType::Code | ItemType::RichText | ItemType::Other
         ) {
-            return Err(AidoPasteError::InvalidInput(
+            return Err(PasteError::InvalidInput(
                 "only text-like items can be edited".into(),
             ));
         }
@@ -485,7 +485,7 @@ impl Database {
                 self.image_store
                     .remove(image_path.as_deref(), thumbnail_path.as_deref());
             }
-            log::info!(target: "aidopaste", "edit merged id={id} into id={kept_id}");
+            log::info!(target: "paste", "edit merged id={id} into id={kept_id}");
             let item = self.get_item(kept_id)?;
             return Ok(EditOutcome { item, merged: true });
         }
@@ -509,10 +509,10 @@ impl Database {
             ],
         )?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         drop(conn);
-        log::info!(target: "aidopaste", "item edited id={id} size={}", text.len());
+        log::info!(target: "paste", "item edited id={id} size={}", text.len());
         let item = self.get_item(id)?;
         Ok(EditOutcome {
             item,
@@ -524,7 +524,7 @@ impl Database {
     pub fn rename_item(&self, id: i64, title: &str) -> Result<()> {
         let trimmed = title.trim();
         if trimmed.is_empty() {
-            return Err(AidoPasteError::InvalidInput(
+            return Err(PasteError::InvalidInput(
                 "title must not be empty".into(),
             ));
         }
@@ -535,7 +535,7 @@ impl Database {
             params![id, trimmed, now_ms()],
         )?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         Ok(())
     }
@@ -547,7 +547,7 @@ impl Database {
             params![id, pinned],
         )?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         Ok(())
     }
@@ -574,7 +574,7 @@ impl Database {
                 .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
         if deleted > 0 {
-            log::info!(target: "aidopaste", "cleanup deleted count={deleted}");
+            log::info!(target: "paste", "cleanup deleted count={deleted}");
         }
         Ok(deleted)
     }
@@ -601,7 +601,7 @@ impl Database {
                 .remove(image_path.as_deref(), thumbnail_path.as_deref());
         }
         if deleted > 0 {
-            log::info!(target: "aidopaste", "history limit trimmed count={deleted}");
+            log::info!(target: "paste", "history limit trimmed count={deleted}");
         }
         Ok(deleted)
     }
@@ -665,11 +665,11 @@ impl Database {
         let affected = tx.execute("DELETE FROM boards WHERE id = ?1", params![id])?;
         if affected == 0 {
             // tx drop 即回滚：条目释放不会半途生效
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         tx.commit()?;
         drop(conn);
-        log::info!(target: "aidopaste", "board deleted id={id} items_released={released}");
+        log::info!(target: "paste", "board deleted id={id} items_released={released}");
         Ok(())
     }
 
@@ -687,7 +687,7 @@ impl Database {
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(AidoPasteError::from)
+            .map_err(PasteError::from)
     }
 
     /// 把条目移入文件夹（board_id = NULL 表示移回默认「剪贴板」）。
@@ -701,7 +701,7 @@ impl Database {
                 |row| row.get(0),
             )?;
             if exists == 0 {
-                return Err(AidoPasteError::NotFound(board));
+                return Err(PasteError::NotFound(board));
             }
         }
         let affected = conn.execute(
@@ -709,12 +709,12 @@ impl Database {
             params![item_id, board_id],
         )?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(item_id));
+            return Err(PasteError::NotFound(item_id));
         }
         drop(conn);
         if board_id.is_none() && self.get_item(item_id)?.removed_from_history {
             self.delete_item(item_id)?;
-            log::info!(target: "aidopaste", "soft-removed item purged on board exit id={item_id}");
+            log::info!(target: "paste", "soft-removed item purged on board exit id={item_id}");
         }
         Ok(())
     }
@@ -723,7 +723,7 @@ impl Database {
     pub fn rename_board(&self, id: i64, name: &str) -> Result<()> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
-            return Err(AidoPasteError::InvalidInput(
+            return Err(PasteError::InvalidInput(
                 "board name must not be empty".into(),
             ));
         }
@@ -733,7 +733,7 @@ impl Database {
             params![id, trimmed],
         )?;
         if affected == 0 {
-            return Err(AidoPasteError::NotFound(id));
+            return Err(PasteError::NotFound(id));
         }
         Ok(())
     }
@@ -772,7 +772,7 @@ impl Database {
 }
 
 /// §20：存储根目录默认取数据库文件的祖父目录
-/// （`.../AidoPaste/Database/clipboard.db` → `.../AidoPaste`）。
+/// （`.../Paste/Database/clipboard.db` → `.../Paste`）。
 fn derive_storage_root(db_path: &Path) -> PathBuf {
     db_path
         .parent()
@@ -811,7 +811,7 @@ fn fetch_artifacts_where(
         ))
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(AidoPasteError::from)
+        .map_err(PasteError::from)
 }
 
 /// 解析后的条目：类型修正 / metadata 合并 / 内容哈希 / 大小（§16-§21）。
@@ -978,7 +978,7 @@ pub(crate) fn list_items(
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(values), row_to_item)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(AidoPasteError::from)
+        .map_err(PasteError::from)
 }
 
 pub(crate) fn row_to_item(row: &Row) -> rusqlite::Result<ClipboardItem> {
@@ -1015,25 +1015,25 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
             continue;
         }
         // 每个迁移与 user_version 写入同事务，失败整体回滚（§46、§47）
-        let tx = conn.transaction().map_err(|e| AidoPasteError::Migration {
+        let tx = conn.transaction().map_err(|e| PasteError::Migration {
             target,
             message: e.to_string(),
         })?;
         tx.execute_batch(sql)
-            .map_err(|e| AidoPasteError::Migration {
+            .map_err(|e| PasteError::Migration {
                 target,
                 message: e.to_string(),
             })?;
         tx.pragma_update(None, "user_version", target as i64)
-            .map_err(|e| AidoPasteError::Migration {
+            .map_err(|e| PasteError::Migration {
                 target,
                 message: e.to_string(),
             })?;
-        tx.commit().map_err(|e| AidoPasteError::Migration {
+        tx.commit().map_err(|e| PasteError::Migration {
             target,
             message: e.to_string(),
         })?;
-        log::info!(target: "aidopaste", "database migrated to v{target}");
+        log::info!(target: "paste", "database migrated to v{target}");
     }
     debug_assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION);
     Ok(())

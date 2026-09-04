@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn classifies_json() {
         assert_eq!(
-            classify_text(r#"{"name": "AidoPaste", "version": 1}"#),
+            classify_text(r#"{"name": "Paste", "version": 1}"#),
             ItemType::Code
         );
         assert_eq!(detect_code_language(r#"{"a": [1, 2, 3]}"#), Some("json"));

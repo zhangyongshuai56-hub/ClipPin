@@ -1,5 +1,5 @@
-module AidoPasteCoreFFI {
-    header "AidoPasteCoreFFI.h"
+module PasteCoreFFI {
+    header "PasteCoreFFI.h"
     export *
     use "Darwin"
     use "_Builtin_stdbool"

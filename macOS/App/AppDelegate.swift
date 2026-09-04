@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement 兜底：确保应用以菜单栏常驻方式运行，不占用 Dock
         NSApp.setActivationPolicy(.accessory)
+        // 0.2.0 改名迁移：接管旧 AidoPaste 的数据目录与用户偏好（幂等）
+        LegacyMigrator.migrateIfNeeded()
         Task {
             await CoreStore.shared.bootstrap()
             // §53：失败必须可见——数据库不可用时弹窗说明，而不是菜单栏点击无响应
@@ -16,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let error = CoreStore.shared.startupError {
                     let alert = NSAlert()
                     alert.alertStyle = .critical
-                    alert.messageText = "AidoPaste 数据库初始化失败"
+                    alert.messageText = "Paste 数据库初始化失败"
                     alert.informativeText = error.errorDescription ?? "请重启应用再试。"
                     alert.addButton(withTitle: "好")
                     alert.runModal()
@@ -32,8 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             registerGlobalShortcut()
 
-            // 调试 / 自动化测试钩子：传入 -AidoPasteShowWindowOnLaunch 时启动即显示主窗口
-            if ProcessInfo.processInfo.arguments.contains("-AidoPasteShowWindowOnLaunch") {
+            // 调试 / 自动化测试钩子：传入 -PasteShowWindowOnLaunch 时启动即显示主窗口
+            if ProcessInfo.processInfo.arguments.contains("-PasteShowWindowOnLaunch") {
                 WindowManager.shared.showClipboardWindow()
             }
         }

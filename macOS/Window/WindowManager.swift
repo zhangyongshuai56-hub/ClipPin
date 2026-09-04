@@ -7,7 +7,7 @@ import os
 final class WindowManager: NSObject, NSWindowDelegate {
     static let shared = WindowManager()
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "window")
+    private let logger = Logger(subsystem: "com.paste.app", category: "window")
 
     private var clipboardWindow: ClipboardWindow?
     /// 窗口内容使用的 ViewModel；随窗口内容一起释放。

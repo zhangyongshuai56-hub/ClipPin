@@ -22,7 +22,7 @@ enum QuickPasteOutcome {
 final class PasteService {
     static let shared = PasteService()
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "paste")
+    private let logger = Logger(subsystem: "com.paste.app", category: "paste")
 
     /// 剪贴板窗口弹出前的前台应用（粘贴目标）。需求 §13：不能把自己当目标。
     private(set) var previousApp: NSRunningApplication?

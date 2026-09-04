@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "AA0000000000000000000006"
-               BuildableName = "AidoPaste.app"
-               BlueprintName = "AidoPaste"
-               ReferencedContainer = "container:AidoPaste.xcodeproj">
+               BuildableName = "Paste.app"
+               BlueprintName = "Paste"
+               ReferencedContainer = "container:Paste.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -42,9 +42,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA0000000000000000000006"
-            BuildableName = "AidoPaste.app"
-            BlueprintName = "AidoPaste"
-            ReferencedContainer = "container:AidoPaste.xcodeproj">
+            BuildableName = "Paste.app"
+            BlueprintName = "Paste"
+            ReferencedContainer = "container:Paste.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -59,9 +59,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AA0000000000000000000006"
-            BuildableName = "AidoPaste.app"
-            BlueprintName = "AidoPaste"
-            ReferencedContainer = "container:AidoPaste.xcodeproj">
+            BuildableName = "Paste.app"
+            BlueprintName = "Paste"
+            ReferencedContainer = "container:Paste.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

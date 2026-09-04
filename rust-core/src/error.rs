@@ -1,8 +1,8 @@
 //! 统一错误模型（§82）。Phase 3 通过 UniFFI 暴露给 Swift，映射为 UserFacingError。
 
-/// AidoPaste 核心错误。
+/// Paste 核心错误。
 #[derive(Debug, thiserror::Error)]
-pub enum AidoPasteError {
+pub enum PasteError {
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
 
@@ -26,4 +26,4 @@ pub enum AidoPasteError {
 }
 
 /// 核心统一 Result 别名。
-pub type Result<T> = std::result::Result<T, AidoPasteError>;
+pub type Result<T> = std::result::Result<T, PasteError>;

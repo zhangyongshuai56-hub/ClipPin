@@ -1,4 +1,4 @@
-//! AidoPaste Rust Core。
+//! Paste Rust Core。
 //!
 //! 职责（§5）：剪贴板数据模型、去重、内容分类、SQLite 存储、搜索、Pin、
 //! 自动清理、哈希与数据处理。不包含任何 macOS UI 依赖，保持跨平台可复用（§9）。
@@ -16,7 +16,7 @@ pub mod storage;
 
 pub use cleanup::cleanup_manager::{CleanupManager, Retention};
 pub use clipboard::model::{Board, ClipboardItem, ItemType, NewClipboardItem, Statistics};
-pub use error::{AidoPasteError, Result};
+pub use error::{PasteError, Result};
 pub use storage::database::Database;
 
 // 注册 proc-macro 导出（api::ffi），供 uniffi-bindgen --library 模式发现

@@ -3,7 +3,7 @@
 use sha2::{Digest, Sha256};
 
 use super::model::NewClipboardItem;
-use crate::error::{AidoPasteError, Result};
+use crate::error::{PasteError, Result};
 
 /// 内容字节的 SHA-256 十六进制摘要。
 pub fn sha256_hex(data: &[u8]) -> String {
@@ -21,7 +21,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 pub fn hash_for_new_item(item: &NewClipboardItem) -> Result<String> {
     let content = item
         .content()
-        .ok_or_else(|| AidoPasteError::InvalidInput("item has no hashable content".into()))?;
+        .ok_or_else(|| PasteError::InvalidInput("item has no hashable content".into()))?;
     Ok(sha256_hex(content.as_bytes()))
 }
 
@@ -81,7 +81,7 @@ mod tests {
         let item = NewClipboardItem::default();
         assert!(matches!(
             hash_for_new_item(&item),
-            Err(AidoPasteError::InvalidInput(_))
+            Err(PasteError::InvalidInput(_))
         ));
     }
 }

@@ -69,7 +69,7 @@ enum ClipboardReader {
 
         let ext = pngData != nil ? "png" : "tiff"
         let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("aidopaste-capture-\(UUID().uuidString).\(ext)")
+            .appendingPathComponent("paste-capture-\(UUID().uuidString).\(ext)")
         do {
             try imageData.write(to: tempURL)
         } catch {

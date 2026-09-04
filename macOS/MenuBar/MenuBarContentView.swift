@@ -21,7 +21,7 @@ struct MenuBarContentView: View {
         Button("设置…") {
             openSettings()
         }
-        Button("退出 AidoPaste") {
+        Button("退出 Paste") {
             NSApp.terminate(nil)
         }
     }

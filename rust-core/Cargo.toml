@@ -1,8 +1,8 @@
 [package]
-name = "aidopaste-core"
+name = "paste-core"
 version = "0.1.0"
 edition = "2024"
-description = "AidoPaste Rust core: clipboard data model, dedup, SQLite storage, search, cleanup"
+description = "Paste Rust core: clipboard data model, dedup, SQLite storage, search, cleanup"
 publish = false
 
 [lib]

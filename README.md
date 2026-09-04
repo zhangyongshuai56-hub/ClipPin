@@ -1,6 +1,7 @@
-# AidoPaste
+# Paste
 
-本地优先的 macOS 原生剪贴板管理器（参考 Paste 的产品理念，自主实现）。
+本地优先的 macOS 原生剪贴板管理器。0.2.0 起由 AidoPaste 改名为 Paste，
+首次启动自动迁移旧数据目录（`~/Library/Application Support/AidoPaste`）与用户设置。
 
 ## 技术架构
 
@@ -17,10 +18,10 @@
 Rust 经 rustup 安装：`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`。
 
 ```bash
-xcodebuild -scheme AidoPaste -configuration Debug -derivedDataPath .build/DerivedData build
+xcodebuild -scheme Paste -configuration Debug -derivedDataPath .build/DerivedData build
 ```
 
-产品输出：`.build/DerivedData/Build/Products/Debug/AidoPaste.app`
+产品输出：`.build/DerivedData/Build/Products/Debug/Paste.app`
 
 Rust Core 会在 Xcode 构建时由 `Scripts/build-rust-core.sh` 自动编译并生成 Swift 绑定，
 也可手动执行：
@@ -42,7 +43,7 @@ Phase 1 已完成：
 - 设置窗口：登录启动（SMAppService）、主题（跟随系统 / 浅色 / 深色）、关于
 - 明暗色使用系统语义颜色
 
-Phase 2 已完成（`rust-core/`，独立 crate `aidopaste-core`）：
+Phase 2 已完成（`rust-core/`，独立 crate `paste-core`）：
 
 - `ClipboardItem` 数据模型 + 规则分类器（URL / JSON / Swift / Python / JS / SQL / Shell）
 - SHA-256 content_hash 去重：重复复制只刷新时间与来源，保留 Pin
@@ -53,12 +54,12 @@ Phase 2 已完成（`rust-core/`，独立 crate `aidopaste-core`）：
 
 Phase 3 已完成（UniFFI 桥接）：
 
-- Rust 侧 `api/ffi.rs`：`AidoPasteDatabase` 对象 + Record/Enum/Error 全量导出（uniffi 0.32，proc-macro 模式）
+- Rust 侧 `api/ffi.rs`：`PasteDatabase` 对象 + Record/Enum/Error 全量导出（uniffi 0.32，proc-macro 模式）
 - Xcode 集成：`Build Rust Core` script phase（cargo 构建 + uniffi-bindgen 生成绑定），
-  静态库链接（`-laidopaste_core`），FFI 头文件经 `SWIFT_INCLUDE_PATHS` 提供
+  静态库链接（`-lpaste_core`），FFI 头文件经 `SWIFT_INCLUDE_PATHS` 提供
 - Swift 侧分层：`RustCoreBridge`（领域模型 + UserFacingError 映射）→
   `ClipboardRepository`（actor，全量 Core API）→ `CoreStore`（应用启动初始化）
-- 数据库位置：`~/Library/Application Support/AidoPaste/Database/clipboard.db`（WAL）
+- 数据库位置：`~/Library/Application Support/Paste/Database/clipboard.db`（WAL）
 - 端到端验证：应用启动即创建数据库，日志输出 `rust core ready schema=1`
 - 41 个 Rust 测试全绿（含 3 个 FFI 边界测试）
 

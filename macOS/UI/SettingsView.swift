@@ -31,7 +31,7 @@ private struct GeneralSettingsView: View {
         Form {
             Section("启动") {
                 Toggle(
-                    "登录时启动 AidoPaste",
+                    "登录时启动 Paste",
                     isOn: Binding(
                         get: { launchAtLogin },
                         set: { desired in
@@ -282,7 +282,7 @@ private struct AboutSettingsView: View {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("AidoPaste")
+            Text("Paste")
                 .font(.title2).bold()
             Text("版本 \(BundleInfo.version)（\(BundleInfo.build)）")
                 .foregroundStyle(.secondary)

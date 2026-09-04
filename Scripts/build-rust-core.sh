@@ -29,14 +29,14 @@ cargo "${CARGO_ARGS[@]}"
 # 生成绑定（幂等）：Swift 文件进源码树（fileSystemSynchronizedGroups 自动纳入编译），
 # 头文件与 modulemap 拷贝到 OUT_DIR 供 SWIFT_INCLUDE_PATHS 查找
 cargo run --quiet --bin uniffi-bindgen -- generate \
-  --library "target/$TARGET_SUBDIR/libaidopaste_core.a" \
+  --library "target/$TARGET_SUBDIR/libpaste_core.a" \
   --language swift \
   --out-dir "$GEN_DIR"
 
 mkdir -p "$OUT_DIR"
-cp "target/$TARGET_SUBDIR/libaidopaste_core.a" "$OUT_DIR/libaidopaste_core.a"
-cp "$GEN_DIR/AidoPasteCoreFFI.h" "$OUT_DIR/"
+cp "target/$TARGET_SUBDIR/libpaste_core.a" "$OUT_DIR/libpaste_core.a"
+cp "$GEN_DIR/PasteCoreFFI.h" "$OUT_DIR/"
 # Swift ClangImporter 只自动发现名为 module.modulemap 的文件，需按此名提供
-cp "$GEN_DIR/AidoPasteCoreFFI.modulemap" "$OUT_DIR/module.modulemap"
+cp "$GEN_DIR/PasteCoreFFI.modulemap" "$OUT_DIR/module.modulemap"
 
 echo "rust core ready: $OUT_DIR"

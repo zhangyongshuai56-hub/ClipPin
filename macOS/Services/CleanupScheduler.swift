@@ -8,7 +8,7 @@ final class CleanupScheduler {
     static let shared = CleanupScheduler()
     static let interval: TimeInterval = 6 * 60 * 60
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "cleanup")
+    private let logger = Logger(subsystem: "com.paste.app", category: "cleanup")
     private var timer: Timer?
     private var repository: ClipboardRepository?
 

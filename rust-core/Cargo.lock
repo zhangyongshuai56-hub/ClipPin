@@ -9,20 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aidopaste-core"
-version = "0.1.0"
-dependencies = [
- "image",
- "log",
- "rusqlite",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "uniffi",
-]
-
-[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -974,6 +960,20 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "paste-core"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "log",
+ "rusqlite",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "uniffi",
+]
 
 [[package]]
 name = "pastey"

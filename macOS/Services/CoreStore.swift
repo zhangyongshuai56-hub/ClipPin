@@ -6,15 +6,15 @@ import os
 final class CoreStore {
     static let shared = CoreStore()
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "core")
+    private let logger = Logger(subsystem: "com.paste.app", category: "core")
 
     private(set) var repository: ClipboardRepository?
     private(set) var startupError: UserFacingError?
 
-    /// 数据库目录：~/Library/Application Support/AidoPaste/Database（§20）。
+    /// 数据库目录：~/Library/Application Support/Paste/Database（§20）。
     static var databaseDirectoryURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("AidoPaste/Database", isDirectory: true)
+            .appendingPathComponent("Paste/Database", isDirectory: true)
     }
 
     /// 初始化 Core。失败必须可见：记录 startupError 供设置页展示，不静默降级（§53）。
@@ -31,7 +31,7 @@ final class CoreStore {
             logger.info("rust core ready schema=\(version, privacy: .public)")
         } catch {
             let userFacing: UserFacingError
-            if let coreError = error as? AidoPasteError {
+            if let coreError = error as? PasteError {
                 userFacing = UserFacingError(coreError)
             } else {
                 userFacing = .storage(error.localizedDescription)

@@ -12,7 +12,7 @@ use crate::clipboard::model::{
     NewClipboardItem as CoreNewItem, RemovalOutcome as CoreRemovalOutcome,
     Statistics as CoreStatistics,
 };
-use crate::error::AidoPasteError as CoreError;
+use crate::error::PasteError as CoreError;
 use crate::storage::database::Database as CoreDatabase;
 use uniffi::{Enum, Object, Record};
 
@@ -245,7 +245,7 @@ impl From<CoreStatistics> for Statistics {
 
 /// 核心错误（§82）。UniFFI 会把它映射为 Swift 的 Error 枚举。
 #[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum AidoPasteError {
+pub enum PasteError {
     #[error("database error: {message}")]
     Database { message: String },
 
@@ -268,7 +268,7 @@ pub enum AidoPasteError {
     Migration { target: u32, message: String },
 }
 
-impl From<CoreError> for AidoPasteError {
+impl From<CoreError> for PasteError {
     fn from(error: CoreError) -> Self {
         match error {
             CoreError::Database(e) => Self::Database {
@@ -287,11 +287,11 @@ impl From<CoreError> for AidoPasteError {
 }
 
 /// 分页参数换算：负数一律报 InvalidInput，不静默截断（§53）。
-fn page_range(limit: i64, offset: i64) -> Result<(usize, usize), AidoPasteError> {
-    let limit = usize::try_from(limit).map_err(|_| AidoPasteError::InvalidInput {
+fn page_range(limit: i64, offset: i64) -> Result<(usize, usize), PasteError> {
+    let limit = usize::try_from(limit).map_err(|_| PasteError::InvalidInput {
         message: format!("limit out of range: {limit}"),
     })?;
-    let offset = usize::try_from(offset).map_err(|_| AidoPasteError::InvalidInput {
+    let offset = usize::try_from(offset).map_err(|_| PasteError::InvalidInput {
         message: format!("offset out of range: {offset}"),
     })?;
     Ok((limit, offset))
@@ -299,15 +299,15 @@ fn page_range(limit: i64, offset: i64) -> Result<(usize, usize), AidoPasteError>
 
 /// 数据库入口对象（§54）。Swift 启动时创建一个实例并长期持有。
 #[derive(Object)]
-pub struct AidoPasteDatabase {
+pub struct PasteDatabase {
     db: CoreDatabase,
 }
 
 #[uniffi::export]
-impl AidoPasteDatabase {
+impl PasteDatabase {
     /// 打开（或创建）指定路径的数据库。
     #[uniffi::constructor]
-    pub fn open(path: String) -> Result<Arc<Self>, AidoPasteError> {
+    pub fn open(path: String) -> Result<Arc<Self>, PasteError> {
         Ok(Arc::new(Self {
             db: CoreDatabase::open(path)?,
         }))
@@ -315,24 +315,24 @@ impl AidoPasteDatabase {
 
     /// 内存数据库，供 Swift 单元测试使用。
     #[uniffi::constructor]
-    pub fn open_in_memory() -> Result<Arc<Self>, AidoPasteError> {
+    pub fn open_in_memory() -> Result<Arc<Self>, PasteError> {
         Ok(Arc::new(Self {
             db: CoreDatabase::open_in_memory()?,
         }))
     }
 
     /// 当前 schema 版本。
-    pub fn schema_version(&self) -> Result<u32, AidoPasteError> {
+    pub fn schema_version(&self) -> Result<u32, PasteError> {
         Ok(self.db.schema_version()?)
     }
 
     /// 创建条目（自动去重，§17）。
-    pub fn create_item(&self, new_item: NewClipboardItem) -> Result<ClipboardItem, AidoPasteError> {
+    pub fn create_item(&self, new_item: NewClipboardItem) -> Result<ClipboardItem, PasteError> {
         Ok(self.db.create_item(to_core_new_item(new_item))?.into())
     }
 
     /// 读取单条。
-    pub fn get_item(&self, id: i64) -> Result<ClipboardItem, AidoPasteError> {
+    pub fn get_item(&self, id: i64) -> Result<ClipboardItem, PasteError> {
         Ok(self.db.get_item(id)?.into())
     }
 
@@ -343,7 +343,7 @@ impl AidoPasteDatabase {
         board_id: Option<i64>,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ClipboardItem>, AidoPasteError> {
+    ) -> Result<Vec<ClipboardItem>, PasteError> {
         let (limit, offset) = page_range(limit, offset)?;
         Ok(self
             .db
@@ -358,7 +358,7 @@ impl AidoPasteDatabase {
         &self,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ClipboardItem>, AidoPasteError> {
+    ) -> Result<Vec<ClipboardItem>, PasteError> {
         let (limit, offset) = page_range(limit, offset)?;
         Ok(self
             .db
@@ -376,7 +376,7 @@ impl AidoPasteDatabase {
         board_id: Option<i64>,
         limit: i64,
         offset: i64,
-    ) -> Result<Vec<ClipboardItem>, AidoPasteError> {
+    ) -> Result<Vec<ClipboardItem>, PasteError> {
         let (limit, offset) = page_range(limit, offset)?;
         Ok(self
             .db
@@ -393,7 +393,7 @@ impl AidoPasteDatabase {
     }
 
     /// 创建 Pinboard 文件夹。
-    pub fn create_board(&self, name: String, color: String) -> Result<Board, AidoPasteError> {
+    pub fn create_board(&self, name: String, color: String) -> Result<Board, PasteError> {
         let board = self.db.create_board(&name, &color)?;
         Ok(Board {
             id: board.id,
@@ -404,12 +404,12 @@ impl AidoPasteDatabase {
     }
 
     /// 删除文件夹（其中条目回到默认「剪贴板」）。
-    pub fn delete_board(&self, id: i64) -> Result<(), AidoPasteError> {
+    pub fn delete_board(&self, id: i64) -> Result<(), PasteError> {
         Ok(self.db.delete_board(id)?)
     }
 
     /// 全部文件夹。
-    pub fn list_boards(&self) -> Result<Vec<Board>, AidoPasteError> {
+    pub fn list_boards(&self) -> Result<Vec<Board>, PasteError> {
         Ok(self
             .db
             .list_boards()?
@@ -424,52 +424,52 @@ impl AidoPasteDatabase {
     }
 
     /// 把条目移入 / 移出文件夹（None = 移回默认「剪贴板」）。
-    pub fn set_item_board(&self, id: i64, board_id: Option<i64>) -> Result<(), AidoPasteError> {
+    pub fn set_item_board(&self, id: i64, board_id: Option<i64>) -> Result<(), PasteError> {
         Ok(self.db.set_item_board(id, board_id)?)
     }
 
     /// 删除单条（物理删除，含图片产物；文件夹视图内删除用这个）。
-    pub fn delete_item(&self, id: i64) -> Result<(), AidoPasteError> {
+    pub fn delete_item(&self, id: i64) -> Result<(), PasteError> {
         Ok(self.db.delete_item(id)?)
     }
 
     /// 从「剪贴板」历史移除条目：未收藏物理删除；已收藏软删除、保留在文件夹中。
-    pub fn remove_item_from_history(&self, id: i64) -> Result<RemovalOutcome, AidoPasteError> {
+    pub fn remove_item_from_history(&self, id: i64) -> Result<RemovalOutcome, PasteError> {
         Ok(self.db.remove_item_from_history(id)?.into())
     }
 
     /// 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
-    pub fn edit_text_item(&self, id: i64, new_text: String) -> Result<EditOutcome, AidoPasteError> {
+    pub fn edit_text_item(&self, id: i64, new_text: String) -> Result<EditOutcome, PasteError> {
         Ok(self.db.edit_text_item(id, &new_text)?.into())
     }
 
     /// 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
-    pub fn rename_item(&self, id: i64, title: String) -> Result<(), AidoPasteError> {
+    pub fn rename_item(&self, id: i64, title: String) -> Result<(), PasteError> {
         Ok(self.db.rename_item(id, &title)?)
     }
 
     /// 重命名文件夹。
-    pub fn rename_board(&self, id: i64, name: String) -> Result<(), AidoPasteError> {
+    pub fn rename_board(&self, id: i64, name: String) -> Result<(), PasteError> {
         Ok(self.db.rename_board(id, &name)?)
     }
 
     /// 批量删除，返回实际删除数。
-    pub fn delete_items(&self, ids: Vec<i64>) -> Result<i64, AidoPasteError> {
+    pub fn delete_items(&self, ids: Vec<i64>) -> Result<i64, PasteError> {
         Ok(self.db.delete_items(&ids)? as i64)
     }
 
     /// Pin（§31）。
-    pub fn pin_item(&self, id: i64) -> Result<(), AidoPasteError> {
+    pub fn pin_item(&self, id: i64) -> Result<(), PasteError> {
         Ok(self.db.pin_item(id)?)
     }
 
     /// Unpin（§31）。
-    pub fn unpin_item(&self, id: i64) -> Result<(), AidoPasteError> {
+    pub fn unpin_item(&self, id: i64) -> Result<(), PasteError> {
         Ok(self.db.unpin_item(id)?)
     }
 
     /// 执行一次过期清理（§32）。
-    pub fn cleanup_expired(&self, retention: Retention) -> Result<i64, AidoPasteError> {
+    pub fn cleanup_expired(&self, retention: Retention) -> Result<i64, PasteError> {
         let deleted = self
             .db
             .cleanup_expired(retention.into(), crate::clipboard::model::now_ms())?;
@@ -477,20 +477,20 @@ impl AidoPasteDatabase {
     }
 
     /// 历史条数上限（§50），返回清理条数。
-    pub fn enforce_history_limit(&self, max_count: i64) -> Result<i64, AidoPasteError> {
-        let max_count = usize::try_from(max_count).map_err(|_| AidoPasteError::InvalidInput {
+    pub fn enforce_history_limit(&self, max_count: i64) -> Result<i64, PasteError> {
+        let max_count = usize::try_from(max_count).map_err(|_| PasteError::InvalidInput {
             message: format!("max_count out of range: {max_count}"),
         })?;
         Ok(self.db.enforce_history_limit(max_count)? as i64)
     }
 
     /// 统计信息。
-    pub fn get_statistics(&self) -> Result<Statistics, AidoPasteError> {
+    pub fn get_statistics(&self) -> Result<Statistics, PasteError> {
         Ok(self.db.get_statistics()?.into())
     }
 
     /// 清扫孤儿图片文件（§48），返回删除数。
-    pub fn sweep_orphan_artifacts(&self) -> Result<i64, AidoPasteError> {
+    pub fn sweep_orphan_artifacts(&self) -> Result<i64, PasteError> {
         Ok(self.db.sweep_orphan_artifacts()? as i64)
     }
 }
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn ffi_surface_roundtrip_search_pin_statistics() {
-        let db = AidoPasteDatabase::open_in_memory().unwrap();
+        let db = PasteDatabase::open_in_memory().unwrap();
         assert_eq!(db.schema_version().unwrap(), 4);
 
         let created = db
@@ -537,23 +537,23 @@ mod tests {
 
     #[test]
     fn ffi_error_mapping_not_found() {
-        let db = AidoPasteDatabase::open_in_memory().unwrap();
+        let db = PasteDatabase::open_in_memory().unwrap();
         match db.get_item(987654) {
-            Err(AidoPasteError::NotFound { id }) => assert_eq!(id, 987654),
+            Err(PasteError::NotFound { id }) => assert_eq!(id, 987654),
             other => panic!("expected NotFound, got {other:?}"),
         }
     }
 
     #[test]
     fn ffi_page_range_rejects_negative() {
-        let db = AidoPasteDatabase::open_in_memory().unwrap();
+        let db = PasteDatabase::open_in_memory().unwrap();
         let error = db.get_items(None, None, -1, 0).unwrap_err();
-        assert!(matches!(error, AidoPasteError::InvalidInput { .. }));
+        assert!(matches!(error, PasteError::InvalidInput { .. }));
     }
 
     #[test]
     fn ffi_soft_remove_and_rename_board() {
-        let db = AidoPasteDatabase::open_in_memory().unwrap();
+        let db = PasteDatabase::open_in_memory().unwrap();
         let created = db
             .create_item(NewClipboardItem {
                 item_type: ItemType::Text,

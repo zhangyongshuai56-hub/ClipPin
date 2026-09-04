@@ -1,7 +1,7 @@
 import Foundation
 
-// 说明：UniFFI 生成的 AidoPasteCore.swift 与本文件同属 app target（fileSystemSynchronizedGroups），
-// 其类型无需 import 即可直接使用；AidoPasteCoreFFI 头文件经 SWIFT_INCLUDE_PATHS 提供给生成代码。
+// 说明：UniFFI 生成的 PasteCore.swift 与本文件同属 app target（fileSystemSynchronizedGroups），
+// 其类型无需 import 即可直接使用；PasteCoreFFI 头文件经 SWIFT_INCLUDE_PATHS 提供给生成代码。
 // MARK: - Swift 领域模型（§55：UI 与 ViewModel 不接触 FFI 类型）
 
 /// 剪贴板条目类型。
@@ -269,7 +269,7 @@ enum UserFacingError: LocalizedError, Sendable {
     case fileSystem(String)
     case migration(String)
 
-    init(_ error: AidoPasteError) {
+    init(_ error: PasteError) {
         switch error {
         case .Database(let message): self = .database(message)
         case .Storage(let message): self = .storage(message)

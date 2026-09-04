@@ -96,7 +96,7 @@ enum GlobalShortcutError: LocalizedError {
 final class GlobalShortcutManager {
     static let shared = GlobalShortcutManager()
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "shortcut")
+    private let logger = Logger(subsystem: "com.paste.app", category: "shortcut")
 
     private var eventHandlerRef: EventHandlerRef?
     private var hotKeyRef: EventHotKeyRef?

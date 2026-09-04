@@ -1,8 +1,8 @@
 //! 集成测试：创建 → 去重 → 分类 → 搜索 → Pin → 清理 → 统计 → 持久化。
 //! 覆盖 §68（数据库/去重/分类/搜索/清理）与 §70 的 Core 侧场景。
 
-use aidopaste_core::storage::database::SCHEMA_VERSION;
-use aidopaste_core::{CleanupManager, Database, ItemType, NewClipboardItem, Retention};
+use paste_core::storage::database::SCHEMA_VERSION;
+use paste_core::{CleanupManager, Database, ItemType, NewClipboardItem, Retention};
 
 fn text(content: &str) -> NewClipboardItem {
     NewClipboardItem {
@@ -26,12 +26,12 @@ fn source(content: &str, app: &str) -> NewClipboardItem {
 fn duplicate_content_dedups_and_touches() {
     let db = Database::open_in_memory().unwrap();
     let first = db
-        .create_item(source("Hello AidoPaste", "com.apple.Safari"))
+        .create_item(source("Hello Paste", "com.apple.Safari"))
         .unwrap();
     db.pin_item(first.id).unwrap();
 
     let again = db
-        .create_item(source("Hello AidoPaste", "com.google.Chrome"))
+        .create_item(source("Hello Paste", "com.google.Chrome"))
         .unwrap();
 
     // 同内容不产生新记录，id 不变
@@ -53,7 +53,7 @@ fn text_is_auto_classified_to_url_or_code() {
     assert_eq!(url.title.as_deref(), Some("apple.com"));
 
     let code = db
-        .create_item(text(r#"{"name": "AidoPaste", "tags": [1, 2]}"#))
+        .create_item(text(r#"{"name": "Paste", "tags": [1, 2]}"#))
         .unwrap();
     assert_eq!(code.item_type, ItemType::Code);
     let metadata = code.metadata.as_deref().unwrap_or_default();
@@ -230,7 +230,7 @@ fn pin_unpin_and_pinned_listing() {
     // 不存在的 id 报 NotFound
     assert!(matches!(
         db.pin_item(999),
-        Err(aidopaste_core::AidoPasteError::NotFound(999))
+        Err(paste_core::PasteError::NotFound(999))
     ));
 }
 
@@ -242,7 +242,7 @@ fn cleanup_keeps_pinned_and_respects_retention_never() {
     db.pin_item(pinned.id).unwrap();
 
     // 8 天后
-    let future = aidopaste_core::clipboard::model::now_ms() + 8 * 86_400_000;
+    let future = paste_core::clipboard::model::now_ms() + 8 * 86_400_000;
     assert_eq!(db.cleanup_expired(Retention::SevenDays, future).unwrap(), 1);
     assert!(db.get_item(plain.id).is_err());
     assert!(db.get_item(pinned.id).is_ok());
@@ -329,7 +329,7 @@ fn missing_items_report_not_found() {
     let db = Database::open_in_memory().unwrap();
     assert!(matches!(
         db.get_item(12345),
-        Err(aidopaste_core::AidoPasteError::NotFound(12345))
+        Err(paste_core::PasteError::NotFound(12345))
     ));
     assert!(db.delete_item(12345).is_err());
     assert!(db.unpin_item(12345).is_err());
@@ -424,7 +424,7 @@ fn cleanup_and_history_limit_remove_image_artifacts() {
     let image_path = item.image_path.clone().unwrap();
     let thumbnail_path = item.thumbnail_path.clone().unwrap();
 
-    let future = aidopaste_core::clipboard::model::now_ms() + 2 * 86_400_000;
+    let future = paste_core::clipboard::model::now_ms() + 2 * 86_400_000;
     assert_eq!(db.cleanup_expired(Retention::OneDay, future).unwrap(), 1);
     assert!(!std::path::Path::new(&image_path).exists());
     assert!(!std::path::Path::new(&thumbnail_path).exists());
@@ -508,11 +508,11 @@ fn folder_items_are_detected_from_actual_filesystem() {
 #[test]
 fn missing_files_fail_without_creating_rows() {
     let db = Database::open_in_memory().unwrap();
-    let missing = std::path::Path::new("/tmp/aidopaste-nonexistent-file-xyz");
+    let missing = std::path::Path::new("/tmp/paste-nonexistent-file-xyz");
     let result = db.create_item(file_item(missing));
     assert!(matches!(
         result,
-        Err(aidopaste_core::AidoPasteError::FileSystem(_))
+        Err(paste_core::PasteError::FileSystem(_))
     ));
     assert_eq!(db.get_items(None, None, 100, 0).unwrap().len(), 0);
 }
@@ -619,7 +619,7 @@ fn boards_crud_and_item_membership() {
     assert!(db.get_item(a.id).is_ok());
     assert!(matches!(
         db.delete_board(board.id),
-        Err(aidopaste_core::AidoPasteError::NotFound(_))
+        Err(paste_core::PasteError::NotFound(_))
     ));
 }
 
@@ -630,7 +630,7 @@ fn board_items_are_exempt_from_cleanup_and_limit() {
     let board = db.create_board("珍藏", "#FF8800").unwrap();
     db.set_item_board(item.id, Some(board.id)).unwrap();
 
-    let future = aidopaste_core::clipboard::model::now_ms() + 2 * 86_400_000;
+    let future = paste_core::clipboard::model::now_ms() + 2 * 86_400_000;
     assert_eq!(db.cleanup_expired(Retention::OneDay, future).unwrap(), 0);
     assert_eq!(db.enforce_history_limit(0).unwrap(), 0);
     assert!(db.get_item(item.id).is_ok());

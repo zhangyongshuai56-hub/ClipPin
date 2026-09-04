@@ -74,7 +74,7 @@ final class ClipboardViewModel {
     /// 加载代数：防抖搜索与实时刷新并发时，只让最新一次的结果生效。
     private var loadGeneration = 0
 
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "clipboard-ui")
+    private let logger = Logger(subsystem: "com.paste.app", category: "clipboard-ui")
 
     /// 分页（§58）。
     private let pageSize = 50
@@ -430,7 +430,7 @@ final class ClipboardViewModel {
 
 
     private func setError(_ error: Error) {
-        if let coreError = error as? AidoPasteError {
+        if let coreError = error as? PasteError {
             errorMessage = UserFacingError(coreError).errorDescription
         } else {
             errorMessage = error.localizedDescription

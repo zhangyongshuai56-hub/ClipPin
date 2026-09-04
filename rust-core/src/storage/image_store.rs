@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::{AidoPasteError, Result};
+use crate::error::{PasteError, Result};
 
 /// 缩略图最长边（§59：列表只加载缩略图，不加载原图）。
 const THUMBNAIL_MAX_EDGE: u32 = 320;
@@ -111,7 +111,7 @@ impl ImageStore {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
-                    log::warn!(target: "aidopaste", "artifact remove failed: {error}");
+                    log::warn!(target: "paste", "artifact remove failed: {error}");
                 }
             }
         }
@@ -123,7 +123,7 @@ impl ImageStore {
             Ok(path) => path,
             Err(error) => {
                 // §84：日志不含内容，仅记录失败事实
-                log::warn!(target: "aidopaste", "thumbnail generation skipped: {error}");
+                log::warn!(target: "paste", "thumbnail generation skipped: {error}");
                 None
             }
         }
@@ -131,14 +131,14 @@ impl ImageStore {
 
     fn try_store_thumbnail(&self, source: &Path, content_hash: &str) -> Result<Option<String>> {
         let image = image::open(source)
-            .map_err(|error| AidoPasteError::Storage(format!("image decode failed: {error}")))?;
+            .map_err(|error| PasteError::Storage(format!("image decode failed: {error}")))?;
         let thumbnail = image.thumbnail(THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE);
         let path = self.thumbnails_dir.join(format!("{content_hash}.png"));
         let temp_path = self.thumbnails_dir.join(format!(".tmp-{content_hash}.png"));
         thumbnail
             .save_with_format(&temp_path, image::ImageFormat::Png)
             .map_err(|error| {
-                AidoPasteError::Storage(format!("thumbnail encode failed: {error}"))
+                PasteError::Storage(format!("thumbnail encode failed: {error}"))
             })?;
         fs::rename(&temp_path, &path)?;
         Ok(Some(path.to_string_lossy().into_owned()))

@@ -3,15 +3,15 @@ import Foundation
 /// Core 仓储层（§54、§55）：所有数据库访问经由它，ViewModel 与 UI 不接触 FFI。
 /// SQLite 操作都是微秒级同步调用，actor 串行化即可满足需求；Phase 12 再按测量结果优化。
 actor ClipboardRepository {
-    private let database: AidoPasteDatabase
+    private let database: PasteDatabase
 
     init(databasePath: String) throws {
-        database = try AidoPasteDatabase.open(path: databasePath)
+        database = try PasteDatabase.open(path: databasePath)
     }
 
     /// 内存数据库，仅供 Swift 单元测试。
     init(inMemoryForTesting: Bool) throws {
-        database = try AidoPasteDatabase.openInMemory()
+        database = try PasteDatabase.openInMemory()
     }
 
     func schemaVersion() -> Int {

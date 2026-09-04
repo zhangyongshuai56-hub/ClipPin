@@ -4,7 +4,7 @@ import os
 
 extension Notification.Name {
     /// 监听器成功入库一条新内容后发出；UI 据此刷新列表。
-    static let clipboardMonitorDidSaveItem = Notification.Name("com.aidopaste.clipboard.didSaveItem")
+    static let clipboardMonitorDidSaveItem = Notification.Name("com.paste.clipboard.didSaveItem")
 }
 
 /// 剪贴板监听（§15、§18、§33、§39、§40、§44）。
@@ -19,7 +19,7 @@ final class ClipboardMonitor {
 
     private let appState: AppState
     private let repository: ClipboardRepository
-    private let logger = Logger(subsystem: "com.aidopaste.app", category: "clipboard")
+    private let logger = Logger(subsystem: "com.paste.app", category: "clipboard")
 
     private var timer: Timer?
     /// 最近见过的 changeCount；-1 表示尚未建立基线（首次检查会捕获当前剪贴板）。

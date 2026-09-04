@@ -14,7 +14,7 @@ final class ClipboardWindow: NSPanel {
             backing: .buffered,
             defer: false
         )
-        self.title = "AidoPaste"
+        self.title = "Paste"
         self.titleVisibility = .hidden
         self.titlebarAppearsTransparent = true
         for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {

@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct AidoPasteApp: App {
+struct PasteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		AA0000000000000000000003 /* AidoPaste.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AidoPaste.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000003 /* Paste.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Paste.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -34,7 +34,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		AA0000000000000000000001 /* AidoPaste */ = {
+		AA0000000000000000000001 /* Paste */ = {
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000004 /* macOS */,
@@ -46,7 +46,7 @@
 		AA0000000000000000000002 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000003 /* AidoPaste.app */,
+				AA0000000000000000000003 /* Paste.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -54,9 +54,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		AA0000000000000000000006 /* AidoPaste */ = {
+		AA0000000000000000000006 /* Paste */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = AA000000000000000000000D /* Build configuration list for PBXNativeTarget "AidoPaste" */;
+			buildConfigurationList = AA000000000000000000000D /* Build configuration list for PBXNativeTarget "Paste" */;
 			buildPhases = (
 				AA0000000000000000000010 /* Build Rust Core */,
 				AA0000000000000000000007 /* Sources */,
@@ -71,9 +71,9 @@
 				AA0000000000000000000004 /* macOS */,
 				AA0000000000000000000005 /* Resources */,
 			);
-			name = AidoPaste;
-			productName = AidoPaste;
-			productReference = AA0000000000000000000003 /* AidoPaste.app */;
+			name = Paste;
+			productName = Paste;
+			productReference = AA0000000000000000000003 /* Paste.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -91,7 +91,7 @@
 					};
 				};
 			};
-			buildConfigurationList = AA000000000000000000000A /* Build configuration list for PBXProject "AidoPaste" */;
+			buildConfigurationList = AA000000000000000000000A /* Build configuration list for PBXProject "Paste" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -104,7 +104,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				AA0000000000000000000006 /* AidoPaste */,
+				AA0000000000000000000006 /* Paste */,
 			);
 		};
 /* End PBXProject section */
@@ -204,12 +204,12 @@
 				CODE_SIGN_IDENTITY = "AidoPaste Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AidoPaste;
+				INFOPLIST_KEY_CFBundleDisplayName = Paste;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LIBRARY_SEARCH_PATHS = (
@@ -217,12 +217,12 @@
 					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.1.5;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-laidopaste_core",
+					"-lpaste_core",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.aidopaste.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paste.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_INCLUDE_PATHS = (
@@ -240,13 +240,13 @@
 				CODE_SIGN_IDENTITY = "AidoPaste Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = "";
 				ARCHS = arm64;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AidoPaste;
+				INFOPLIST_KEY_CFBundleDisplayName = Paste;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
 				LIBRARY_SEARCH_PATHS = (
@@ -254,12 +254,12 @@
 					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.1.5;
+				MARKETING_VERSION = 0.2.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-laidopaste_core",
+					"-lpaste_core",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.aidopaste.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paste.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_INCLUDE_PATHS = (
 					"$(inherited)",
@@ -271,7 +271,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		AA000000000000000000000A /* Build configuration list for PBXProject "AidoPaste" */ = {
+		AA000000000000000000000A /* Build configuration list for PBXProject "Paste" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA000000000000000000000B /* Debug */,
@@ -280,7 +280,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		AA000000000000000000000D /* Build configuration list for PBXNativeTarget "AidoPaste" */ = {
+		AA000000000000000000000D /* Build configuration list for PBXNativeTarget "Paste" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AA000000000000000000000E /* Debug */,

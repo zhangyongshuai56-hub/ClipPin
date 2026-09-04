@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::error::{AidoPasteError, Result};
+use crate::error::{PasteError, Result};
 
 /// 标题最大字符数。
 const MAX_TITLE_CHARS: usize = 80;
@@ -159,7 +159,7 @@ impl NewClipboardItem {
     /// 基础校验：至少要有一种可保存的内容。
     pub fn validate(&self) -> Result<()> {
         if self.content().is_none() && self.image_source_path.is_none() {
-            return Err(AidoPasteError::InvalidInput(
+            return Err(PasteError::InvalidInput(
                 "clipboard item requires non-empty text, url, file_path or image".into(),
             ));
         }
@@ -275,7 +275,7 @@ mod tests {
         let item = NewClipboardItem::default();
         assert!(matches!(
             item.validate(),
-            Err(AidoPasteError::InvalidInput(_))
+            Err(PasteError::InvalidInput(_))
         ));
         assert!(text_item("ok").validate().is_ok());
     }
