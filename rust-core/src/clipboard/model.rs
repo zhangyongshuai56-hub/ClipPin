@@ -117,6 +117,28 @@ pub struct ClipboardItem {
     pub content_hash: String,
     pub is_pinned: bool,
     pub metadata: Option<String>,
+    /// 已从「剪贴板」历史软删除；收藏条目保留在文件夹中（v4）。
+    pub removed_from_history: bool,
+    /// 标题由用户命名，内容编辑 / 重新捕获时不覆盖（v4）。
+    pub title_is_custom: bool,
+}
+
+/// 从「剪贴板」历史移除条目的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemovalOutcome {
+    /// 未收藏：已物理删除（图片产物一并清理）。
+    Deleted,
+    /// 已收藏：软删除，条目继续保留在文件夹中。
+    KeptInBoard,
+}
+
+/// 编辑文本条目的结果。
+#[derive(Debug, Clone)]
+pub struct EditOutcome {
+    /// 编辑后（或合并目标）的条目。
+    pub item: ClipboardItem,
+    /// 编辑后的内容与库中已有记录重复，已合并（本条删除、目标条目刷新时间）。
+    pub merged: bool,
 }
 
 impl NewClipboardItem {

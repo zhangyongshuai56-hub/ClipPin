@@ -13,6 +13,10 @@ struct ClipboardView: View {
     /// 新建文件夹弹窗。
     @State private var isCreatingBoard = false
     @State private var newBoardName = ""
+    /// 重命名记录 / 编辑内容 / 重命名文件夹模态（需求：记录命名、编辑、文件夹重命名）。
+    @State private var renamingEntry: ClipboardEntry?
+    @State private var editingEntry: ClipboardEntry?
+    @State private var renamingBoard: Pinboard?
 
     init(viewModel: ClipboardViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -80,6 +84,21 @@ struct ClipboardView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("自动粘贴需要「辅助功能」权限。授权后重新按 ↩ 即可粘贴。")
+        }
+        .sheet(item: $renamingEntry) { entry in
+            RenameItemSheet(entry: entry) { title in
+                Task { await viewModel.rename(entry, to: title) }
+            }
+        }
+        .sheet(item: $editingEntry) { entry in
+            EditItemSheet(entry: entry) { text in
+                Task { await viewModel.edit(entry, text: text) }
+            }
+        }
+        .sheet(item: $renamingBoard) { board in
+            RenameBoardSheet(board: board) { name in
+                Task { await viewModel.renameBoard(board, to: name) }
+            }
         }
     }
 
@@ -169,6 +188,11 @@ struct ClipboardView: View {
         .onTapGesture { viewModel.selectedBoardID = boardID }
         .contextMenu {
             if boardID != nil {
+                Button("重命名…") {
+                    if let board = viewModel.boards.first(where: { $0.id == boardID }) {
+                        renamingBoard = board
+                    }
+                }
                 Button("删除文件夹", role: .destructive) {
                     if let board = viewModel.boards.first(where: { $0.id == boardID }) {
                         Task { await viewModel.deleteBoard(board) }
@@ -243,6 +267,13 @@ struct ClipboardView: View {
         }
         Button("复制到剪贴板") { viewModel.copyToClipboard(entry) }
         Divider()
+        if entry.isTextEditable {
+            Button("编辑内容…") { editingEntry = entry }
+                .keyboardShortcut("e", modifiers: .command)
+        }
+        Button("重命名…") { renamingEntry = entry }
+            .keyboardShortcut("r", modifiers: .command)
+        Divider()
         if viewModel.selectedBoardID != nil {
             Button("移出当前文件夹") {
                 Task { await viewModel.move(entry, toBoard: nil) }
@@ -264,7 +295,9 @@ struct ClipboardView: View {
         Button("打开链接") { viewModel.openLink(entry) }
             .disabled(entry.itemType != .url)
         Divider()
-        Button("删除", role: .destructive) {
+        // 删除语义按视图区分（需求：删除保留收藏）：
+        // 剪贴板视图移除收藏条目是软删除，文件夹视图内才是物理删除
+        Button(viewModel.selectedBoardID == nil ? "从剪贴板移除" : "删除", role: .destructive) {
             Task { await viewModel.delete(entry) }
         }
     }
@@ -329,6 +362,8 @@ struct ClipboardView: View {
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
         guard let window = NSApp.keyWindow, window is ClipboardWindow else { return event }
+        // 模态（重命名 / 编辑）打开时按键全部交还模态
+        guard renamingEntry == nil, editingEntry == nil, renamingBoard == nil else { return event }
 
         let commandPressed = event.modifierFlags.contains(.command)
 
@@ -380,6 +415,14 @@ struct ClipboardView: View {
         case 8: // ⌘C：复制到系统剪贴板（需求 §10）
             guard commandPressed, let entry = viewModel.selectedEntry else { return event }
             viewModel.copyToClipboard(entry)
+            return nil
+        case 14: // ⌘E：编辑内容（仅文本类）
+            guard commandPressed, let entry = viewModel.selectedEntry, entry.isTextEditable else { return event }
+            editingEntry = entry
+            return nil
+        case 15: // ⌘R：重命名
+            guard commandPressed, let entry = viewModel.selectedEntry else { return event }
+            renamingEntry = entry
             return nil
         case 51, 117: // Delete：删除
             guard let entry = viewModel.selectedEntry else { return event }
@@ -454,6 +497,105 @@ extension Color {
 }
 
 
+/// 重命名记录模态（需求：命名记录）。
+private struct RenameItemSheet: View {
+    let entry: ClipboardEntry
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("重命名记录").font(.system(size: 14, weight: .semibold))
+            TextField("标题", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 13))
+            Text("命名后列表优先显示该标题，且不会被后续捕获或内容编辑覆盖。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                Button("保存") {
+                    onSave(title)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(16)
+        .onAppear { title = entry.title ?? "" }
+    }
+}
+
+/// 编辑文本记录模态（需求：编辑记录；仅文本类入口可达）。
+private struct EditItemSheet: View {
+    let entry: ClipboardEntry
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("编辑内容").font(.system(size: 14, weight: .semibold))
+            TextEditor(text: $text)
+                .font(.system(size: 12.5, design: .monospaced))
+                .frame(width: 380, height: 150)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.15))
+                )
+            Text("保存后重新识别类型并重算搜索索引。若与已有记录完全相同，会自动合并为一条。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                Button("保存") {
+                    onSave(text)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(16)
+        .onAppear { text = entry.textContent ?? entry.url ?? "" }
+    }
+}
+
+/// 重命名文件夹模态（需求：文件夹重命名）。
+private struct RenameBoardSheet: View {
+    let board: Pinboard
+    let onSave: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("重命名文件夹").font(.system(size: 14, weight: .semibold))
+            TextField("文件夹名称", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Text("文件夹内的收藏条目不受影响。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel) { dismiss() }
+                Button("保存") {
+                    onSave(name)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(16)
+        .onAppear { name = board.name }
+    }
+}
+
 /// 操作反馈 toast（需求 §18）。
 struct FeedbackToast: View {
     let feedback: OperationFeedback
@@ -480,6 +622,13 @@ struct FeedbackToast: View {
             HStack(spacing: 7) {
                 Image(systemName: "checkmark.circle.fill")
                 Text("已复制到剪贴板")
+            }
+            .foregroundStyle(.white)
+            .toastStyle(background: Color.green.opacity(0.92))
+        case .message(let text):
+            HStack(spacing: 7) {
+                Image(systemName: "checkmark.circle.fill")
+                Text(text)
             }
             .foregroundStyle(.white)
             .toastStyle(background: Color.green.opacity(0.92))

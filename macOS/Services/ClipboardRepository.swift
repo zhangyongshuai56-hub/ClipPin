@@ -64,6 +64,11 @@ actor ClipboardRepository {
         try database.deleteBoard(id: id)
     }
 
+    /// 重命名文件夹。
+    func renameBoard(id: Int64, name: String) throws {
+        try database.renameBoard(id: id, name: name)
+    }
+
     /// 移入文件夹；nil 表示移回默认「剪贴板」。
     func setItemBoard(id: Int64, boardId: Int64?) throws {
         try database.setItemBoard(id: id, boardId: boardId)
@@ -71,6 +76,23 @@ actor ClipboardRepository {
 
     func delete(id: Int64) throws {
         try database.deleteItem(id: id)
+    }
+
+    /// 从「剪贴板」历史移除（需求：删除保留收藏）。
+    /// 未收藏条目物理删除；已收藏条目软删除，继续保留在所属文件夹中。
+    func removeFromHistory(id: Int64) throws -> ItemRemovalOutcome {
+        ItemRemovalOutcome(try database.removeItemFromHistory(id: id))
+    }
+
+    /// 编辑文本条目（重分类；与已有记录重复时自动合并）。
+    func editTextItem(id: Int64, text: String) throws -> ItemEditOutcome {
+        let outcome = try database.editTextItem(id: id, newText: text)
+        return ItemEditOutcome(entry: ClipboardEntry(outcome.item), merged: outcome.merged)
+    }
+
+    /// 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
+    func renameItem(id: Int64, title: String) throws {
+        try database.renameItem(id: id, title: title)
     }
 
     func delete(ids: [Int64]) throws -> Int {

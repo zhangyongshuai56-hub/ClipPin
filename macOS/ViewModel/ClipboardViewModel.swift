@@ -11,6 +11,8 @@ enum OperationFeedback: Equatable {
     /// 粘贴成功，附带目标应用名（如「已粘贴到 Safari」）。
     case pasted(String)
     case copied
+    /// 通用成功提示（命名、编辑、软删除等）。
+    case message(String)
     case failed(String)
 }
 
@@ -215,6 +217,18 @@ final class ClipboardViewModel {
         }
     }
 
+    /// 重命名文件夹（chip 右键「重命名…」）。
+    func renameBoard(_ board: Pinboard, to name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await repository.renameBoard(id: board.id, name: trimmed)
+            await refreshBoards()
+        } catch {
+            setError(error)
+        }
+    }
+
     /// 把条目移入文件夹；boardID 为 nil 表示移回默认「剪贴板」。
     func move(_ entry: ClipboardEntry, toBoard boardID: Int64?) async {
         do {
@@ -340,11 +354,50 @@ final class ClipboardViewModel {
         }
     }
 
+    /// 删除条目（需求：删除保留收藏）。
+    /// 「剪贴板」视图：未收藏条目物理删除，已收藏条目软删除（历史移除、文件夹保留）；
+    /// 文件夹视图：物理删除。
     func delete(_ entry: ClipboardEntry) async {
         do {
-            try await repository.delete(id: entry.id)
+            if selectedBoardID != nil {
+                try await repository.delete(id: entry.id)
+            } else {
+                let outcome = try await repository.removeFromHistory(id: entry.id)
+                if outcome == .keptInBoard {
+                    showFeedback(.message("已从剪贴板移除 · 文件夹收藏已保留"), autoClearAfter: .seconds(2.5))
+                }
+            }
             entries.removeAll { $0.id == entry.id }
             fixSelection()
+        } catch {
+            setError(error)
+        }
+    }
+
+    /// 命名条目（⌘R / 右键「重命名…」）。
+    func rename(_ entry: ClipboardEntry, to title: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await repository.renameItem(id: entry.id, title: trimmed)
+            await load(reset: true)
+            showFeedback(.message("已命名"), autoClearAfter: .seconds(1.2))
+        } catch {
+            setError(error)
+        }
+    }
+
+    /// 编辑文本条目内容（⌘E / 右键「编辑内容…」）。
+    /// 编辑后与已有记录完全相同时 Core 自动合并，此处给出对应反馈。
+    func edit(_ entry: ClipboardEntry, text: String) async {
+        do {
+            let outcome = try await repository.editTextItem(id: entry.id, text: text)
+            await load(reset: true)
+            if outcome.merged {
+                showFeedback(.message("与已有记录相同，已合并为一条"), autoClearAfter: .seconds(2.5))
+            } else {
+                showFeedback(.message("内容已更新"), autoClearAfter: .seconds(1.2))
+            }
         } catch {
             setError(error)
         }

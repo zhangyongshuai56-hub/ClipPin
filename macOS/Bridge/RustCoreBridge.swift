@@ -142,6 +142,41 @@ extension ClipboardEntry {
     }
 }
 
+// MARK: - 移除 / 编辑结果（需求：删除保留收藏、编辑记录）
+
+/// 从「剪贴板」历史移除条目的结果。
+enum ItemRemovalOutcome {
+    /// 未收藏：已物理删除。
+    case deleted
+    /// 已收藏：软删除，条目继续保留在所属文件夹中。
+    case keptInBoard
+
+    init(_ outcome: RemovalOutcome) {
+        switch outcome {
+        case .deleted: self = .deleted
+        case .keptInBoard: self = .keptInBoard
+        }
+    }
+}
+
+/// 编辑文本条目的结果。
+struct ItemEditOutcome {
+    /// 编辑后（或合并目标）的条目。
+    let entry: ClipboardEntry
+    /// 编辑后内容与库中已有记录相同，已合并为一条。
+    let merged: Bool
+}
+
+extension ClipboardEntry {
+    /// 仅文本类记录可编辑内容；图片 / 文件不支持。
+    var isTextEditable: Bool {
+        switch itemType {
+        case .text, .code, .url, .richText, .other: true
+        case .image, .file, .folder: false
+        }
+    }
+}
+
 extension ClipboardEntryType {
     var title: String {
         switch self {

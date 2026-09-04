@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AidoPaste · 记录管理与文件夹重命名 — 设计方案</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif; background: #14161a; color: #dde3ea; padding: 40px 0 80px; }
+  .wrap { width: 1400px; margin: 0 auto; }
+  h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+  .sub { color: #8b95a1; font-size: 14px; margin-bottom: 36px; }
+  .tag { display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 12px; background: rgba(80,140,255,.16); color: #7fb0ff; margin-right: 8px; font-weight: 600; }
+  section { margin-bottom: 56px; }
+  h2 { font-size: 19px; font-weight: 700; margin-bottom: 4px; }
+  h2 .no { color: #7fb0ff; margin-right: 8px; }
+  .desc { color: #9aa3ae; font-size: 13.5px; line-height: 1.7; margin-bottom: 18px; max-width: 1100px; }
+  .desc b { color: #c8d2dd; }
+  .desc code, td code { font-family: "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 4px; color: #a8d0ff; }
+
+  .scene { width: 1400px; border-radius: 18px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #17191d 0%, #20242c 45%, #14181d 100%);
+    border: 1px solid rgba(255,255,255,.07); }
+  .scene .note { position: absolute; top: 14px; left: 18px; font-size: 11.5px; color: #77808c; z-index: 5; letter-spacing: .3px; }
+
+  /* ===== 面板（与应用一致的毛玻璃） ===== */
+  .panel { position: absolute; width: 620px; height: 380px; border-radius: 14px; display: flex; flex-direction: column; overflow: visible;
+    background: rgba(38,41,48,.86); border: 1px solid rgba(255,255,255,.13);
+    box-shadow: 0 28px 70px rgba(10,15,30,.5); backdrop-filter: blur(34px); }
+  .panel .inner { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; }
+  .search { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; flex: none; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .search .ph { opacity: .45; font-size: 14px; color: #aab2bd; }
+  .search .mag { color: #8b95a1; font-size: 13px; }
+  .tabs { display: flex; gap: 6px; padding: 7px 12px; flex: none; align-items: center; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .tab { display: flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 13px; font-size: 11.5px; color: #9aa3ae; position: relative; }
+  .tab .n { font-size: 10px; opacity: .55; }
+  .tab.active { font-weight: 600; background: rgba(80,140,255,.2); color: #7fb0ff; }
+  .tab.active .n { color: #7fb0ff; opacity: .85; }
+  .grid { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px 12px; align-content: start; }
+  .card { border-radius: 9px; padding: 9px 10px 7px; height: 108px; display: flex; flex-direction: column; position: relative;
+    background: rgba(255,255,255,.06); border: 1px solid transparent; }
+  .card.sel { border: 1.5px solid #2f6bff; background: rgba(70,130,255,.16); }
+  .card .head { display: flex; align-items: center; gap: 5px; font-size: 10px; margin-bottom: 5px; color: #8b95a1; }
+  .card .body { flex: 1; font-size: 11.5px; line-height: 1.45; overflow: hidden; color: #dde3ea; }
+  .card .body .mono { font-family: "SF Mono", Menlo, monospace; font-size: 10.5px; }
+  .card .body .u { color: #6ea8ff; }
+  .card .src { font-size: 9.5px; color: #77808c; text-align: right; margin-top: 4px; }
+  .card.sel::after { content: "↩ 粘贴"; position: absolute; top: 6px; right: 6px; font-size: 9.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 9px; background: #2f6bff; color: #fff; }
+  .card .boardflag { position: absolute; top: 6px; right: 8px; font-size: 10px; opacity: .8; }
+  .card.dim { opacity: .45; outline: 1.5px dashed rgba(255,120,120,.55); outline-offset: -1.5px; }
+  .card.gone { outline: none; }
+
+  /* 收藏角标说明 */
+  .legend { position: absolute; font-size: 11px; color: #93b8ff; background: rgba(80,140,255,.12); border: 1px solid rgba(80,140,255,.3);
+    border-radius: 6px; padding: 3px 8px; }
+
+  /* ===== 右键菜单 ===== */
+  .ctx { position: absolute; width: 208px; border-radius: 8px; padding: 4px; z-index: 20;
+    background: rgba(48,52,60,.96); border: 1px solid rgba(255,255,255,.14);
+    box-shadow: 0 16px 44px rgba(0,0,0,.55); font-size: 12.5px; color: #e8edf3; }
+  .ctx .it { display: flex; align-items: center; padding: 5px 9px; border-radius: 5px; gap: 7px; }
+  .ctx .it.hot { background: #2f6bff; color: #fff; }
+  .ctx .it.danger { color: #ff8a8a; }
+  .ctx .it .key { margin-left: auto; opacity: .5; font-size: 11px; }
+  .ctx .it.hot .key { opacity: .85; }
+  .ctx .sep { height: 1px; margin: 4px 8px; background: rgba(255,255,255,.12); }
+  .ctx .ic { width: 15px; text-align: center; opacity: .85; }
+
+  /* ===== Sheet 模态 ===== */
+  .sheet { position: absolute; width: 400px; border-radius: 12px; padding: 16px; z-index: 30;
+    background: rgba(52,56,64,.98); border: 1px solid rgba(255,255,255,.16);
+    box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+  .sheet h3 { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #eef2f7; }
+  .sheet label { display: block; font-size: 11.5px; color: #9aa3ae; margin-bottom: 6px; }
+  .sheet .input { width: 100%; height: 34px; border-radius: 8px; border: 1.5px solid #2f6bff; padding: 0 10px; font-size: 13px;
+    background: rgba(0,0,0,.28); color: #eef2f7; outline: none; }
+  .sheet .area { width: 100%; height: 130px; border-radius: 8px; border: 1.5px solid #2f6bff; padding: 8px 10px; font-size: 12.5px; line-height: 1.5;
+    background: rgba(0,0,0,.28); color: #eef2f7; outline: none; font-family: "SF Mono", Menlo, monospace; resize: none; }
+  .sheet .hint { font-size: 11px; color: #8b95a1; margin-top: 8px; line-height: 1.55; }
+  .sheet .hint.warn { color: #ffc46b; }
+  .sheet .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .sheet .btn { font-size: 12.5px; padding: 6px 16px; border-radius: 7px; }
+  .sheet .btn.ghost { background: rgba(255,255,255,.08); color: #c8d2dd; }
+  .sheet .btn.pri { background: #2f6bff; color: #fff; font-weight: 600; }
+
+  /* ===== Toast ===== */
+  .toast { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px;
+    padding: 8px 16px; border-radius: 10px; z-index: 25; color: #e8edf3;
+    background: rgba(30,33,38,.95); border: 1px solid rgba(255,255,255,.15); box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .toast .ok { color: #7ee2a8; margin-right: 6px; }
+
+  .arrow { position: absolute; font-size: 22px; color: #5a6472; z-index: 4; }
+  .flowlabel { position: absolute; font-size: 11.5px; color: #93b8ff; font-weight: 600; z-index: 4; }
+
+  /* ===== 表格 / 清单 ===== */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 14px 0 8px; }
+  th, td { border: 1px solid rgba(255,255,255,.1); padding: 8px 12px; text-align: left; line-height: 1.6; vertical-align: top; }
+  th { background: rgba(255,255,255,.05); color: #aeb8c4; font-size: 12px; }
+  td { color: #c8d2dd; }
+  .decision { border: 1px solid rgba(255,196,107,.3); background: rgba(255,196,107,.07); border-radius: 12px; padding: 16px 20px; margin-top: 10px; }
+  .decision h3 { font-size: 14.5px; color: #ffc46b; margin-bottom: 10px; }
+  .decision ol { margin-left: 20px; font-size: 13px; line-height: 2; color: #d8dee6; }
+  .decision .rec { color: #7ee2a8; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>AidoPaste · 记录管理与文件夹重命名</h1>
+  <div class="sub">
+    <span class="tag">① 删除保留收藏</span>
+    <span class="tag">② 记录重命名 / 编辑内容</span>
+    <span class="tag">③ 文件夹重命名</span>
+    设计稿 v1 · 待确认后实施
+  </div>
+
+  <!-- ================= 需求一 ================= -->
+  <section>
+    <h2><span class="no">①</span>删除剪贴板记录后，文件夹收藏继续保留</h2>
+    <div class="desc">
+      现状：收藏条目同时出现在「剪贴板」和所属文件夹，在任意一处删除都是<b>物理删除</b>，收藏随之消失。<br>
+      方案：<b>删除语义按当前视图区分</b>——在「剪贴板」视图删除已收藏条目 = <b>软删除</b>（从历史移除、取消置顶，收藏与文件夹内内容原样保留）；
+      在<b>文件夹视图内</b>删除 = 真正删除。软删除条目若之后被移出文件夹，立即物理删除，不留幽灵数据。
+    </div>
+    <div class="scene" style="height: 480px;">
+      <div class="note">场景：「剪贴板」视图中删除一条已收藏（📁）的记录</div>
+
+      <!-- 删除前面板 -->
+      <div class="panel" style="left: 30px; top: 46px;">
+        <div class="inner">
+          <div class="search"><span class="mag">🔍</span><span class="ph">搜索剪贴板…</span></div>
+          <div class="tabs">
+            <div class="tab active">剪贴板 <span class="n">128</span></div>
+            <div class="tab">工作资料 <span class="n">12</span></div>
+            <div class="tab">灵感 <span class="n">3</span></div>
+            <div class="tab" style="opacity:.6;">＋</div>
+          </div>
+          <div class="grid">
+            <div class="card sel"><div class="head">📄 文本</div><div class="body">Q3 复盘会议纪要：核心指标环比 +12%，下季度聚焦留存……</div><div class="src">Notes · 3分钟前</div><div class="boardflag" title="已收藏到「工作资料」">📁</div></div>
+            <div class="card"><div class="head">🔗 链接</div><div class="body"><span class="u">developer.apple.com/design</span></div><div class="src">Safari · 12分钟前</div></div>
+            <div class="card"><div class="head">⌨️ 代码</div><div class="body"><span class="mono">let task = Task { await …</span></div><div class="src">Xcode · 1小时前</div></div>
+            <div class="card"><div class="head">📄 文本</div><div class="body">会议改到周四下午 3 点，请提前准备演示环境</div><div class="src">微信 · 2小时前</div></div>
+          </div>
+        </div>
+        <!-- 右键菜单 -->
+        <div class="ctx" style="left: 218px; top: 200px;">
+          <div class="it hot"><span class="ic">⏎</span>粘贴到当前应用</div>
+          <div class="it"><span class="ic">⌘</span>复制到剪贴板 <span class="key">⌘C</span></div>
+          <div class="sep"></div>
+          <div class="it"><span class="ic">E</span>编辑内容… <span class="key">⌘E</span></div>
+          <div class="it"><span class="ic">R</span>重命名… <span class="key">⌘R</span></div>
+          <div class="it"><span class="ic">P</span>置顶 <span class="key">⌘P</span></div>
+          <div class="sep"></div>
+          <div class="it"><span class="ic">F</span>移入文件夹 ▸</div>
+          <div class="it"><span class="ic">🗑</span>从剪贴板移除 <span class="key">⌫</span></div>
+        </div>
+        <div class="legend" style="left: 30px; bottom: 12px;">右键菜单：已收藏条目上「删除」自动变为「从剪贴板移除」，执行软删除</div>
+      </div>
+      <div class="arrow" style="left: 668px; top: 220px;">➜</div>
+      <div class="flowlabel" style="left: 662px; top: 190px;">按 ⌫ / 右键移除</div>
+
+      <!-- 删除后面板：历史视图消失 + toast -->
+      <div class="panel" style="left: 740px; top: 46px;">
+        <div class="inner">
+          <div class="search"><span class="mag">🔍</span><span class="ph">搜索剪贴板…</span></div>
+          <div class="tabs">
+            <div class="tab active">剪贴板 <span class="n">127</span></div>
+            <div class="tab">工作资料 <span class="n">12</span></div>
+            <div class="tab">灵感 <span class="n">3</span></div>
+            <div class="tab" style="opacity:.6;">＋</div>
+          </div>
+          <div class="grid">
+            <div class="card gone" style="background: rgba(255,255,255,.02); border: 1px dashed rgba(255,255,255,.14); display: grid; place-items: center; color: #6a7480; font-size: 11px;">已移除</div>
+            <div class="card"><div class="head">🔗 链接</div><div class="body"><span class="u">developer.apple.com/design</span></div><div class="src">Safari · 12分钟前</div></div>
+            <div class="card"><div class="head">⌨️ 代码</div><div class="body"><span class="mono">let task = Task { await …</span></div><div class="src">Xcode · 1小时前</div></div>
+            <div class="card"><div class="head">📄 文本</div><div class="body">会议改到周四下午 3 点，请提前准备演示环境</div><div class="src">微信 · 2小时前</div></div>
+          </div>
+        </div>
+        <div class="toast"><span class="ok">✓</span>已从剪贴板移除 · 「工作资料」文件夹中的收藏已保留</div>
+      </div>
+      <div class="legend" style="left: 740px; bottom: 12px; width: 620px; text-align: center;">「剪贴板」计数 128 → 127；条目从历史消失，文件夹内仍完整保留（含图片、置顶状态重置）</div>
+    </div>
+
+    <div class="scene" style="height: 300px; margin-top: 14px;">
+      <div class="note">对比：切换到「工作资料」文件夹视图 —— 记录仍在；在此视图内删除才是真删除</div>
+      <div class="panel" style="left: 30px; top: 46px;">
+        <div class="inner">
+          <div class="search"><span class="mag">🔍</span><span class="ph">搜索剪贴板…</span></div>
+          <div class="tabs">
+            <div class="tab">剪贴板 <span class="n">127</span></div>
+            <div class="tab active">工作资料 <span class="n">12</span></div>
+            <div class="tab">灵感 <span class="n">3</span></div>
+          </div>
+          <div class="grid">
+            <div class="card sel"><div class="head">📄 文本</div><div class="body">Q3 复盘会议纪要：核心指标环比 +12%，下季度聚焦留存……</div><div class="src">Notes · 3分钟前</div></div>
+            <div class="card"><div class="head">📄 文本</div><div class="body">季度 OKR 草稿：O1 提升跨端体验一致性……</div><div class="src">备忘录 · 昨天</div></div>
+            <div class="card"><div class="head">🖼 图片</div><div class="body" style="display:grid;place-items:center;color:#77808c;">🖼 截图 2026-09-04</div><div class="src">微信 · 昨天</div></div>
+            <div class="card"></div>
+          </div>
+        </div>
+        <div class="ctx" style="left: 218px; top: 175px;">
+          <div class="it hot"><span class="ic">⏎</span>粘贴到当前应用</div>
+          <div class="it"><span class="ic">⌘</span>复制到剪贴板 <span class="key">⌘C</span></div>
+          <div class="sep"></div>
+          <div class="it"><span class="ic">R</span>重命名… <span class="key">⌘R</span></div>
+          <div class="it"><span class="ic">↩</span>移出当前文件夹</div>
+          <div class="sep"></div>
+          <div class="it danger"><span class="ic">🗑</span>删除 <span class="key">⌫</span></div>
+        </div>
+      </div>
+      <div class="legend" style="left: 690px; top: 130px; width: 660px; line-height: 1.9;">
+        · 文件夹视图内右键为<b style="color:#ff8a8a;">「删除」</b>（红色，物理删除，含图片产物）<br>
+        · 收藏条目豁免自动清理与历史上限的逻辑保持不变<br>
+        · 已收藏 + 已置顶的条目被软删除时同时取消置顶，置顶视图不再残留
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 需求二 ================= -->
+  <section>
+    <h2><span class="no">②</span>记录重命名与编辑内容</h2>
+    <div class="desc">
+      <b>重命名</b>：给记录起自定义标题（如「客户端发布检查清单」），列表与搜索按命名匹配；命名过的记录不会被后续捕获/编辑覆盖标题。<br>
+      <b>编辑内容</b>：仅对文本类（文本 / 代码 / 链接 / 其他）开放，图片与文件不可编辑。保存后重算内容指纹并重新分类；
+      若编辑后的内容与库中已有记录完全相同，<b>自动合并</b>（保留已有记录并刷新其时间），提示「已与已有记录合并」。
+    </div>
+    <div class="scene" style="height: 470px;">
+      <div class="note">交互入口：右键菜单（⌘E 编辑 / ⌘R 重命名）与两个模态</div>
+
+      <!-- 重命名 sheet -->
+      <div class="sheet" style="left: 40px; top: 60px;">
+        <h3>重命名记录</h3>
+        <label>标题</label>
+        <div class="input">客户端发布检查清单</div>
+        <div class="hint">命名后列表优先显示该标题；取消命名可恢复为自动标题（后续版本支持「恢复自动标题」）。</div>
+        <div class="btns"><div class="btn ghost">取消</div><div class="btn pri">保存</div></div>
+      </div>
+
+      <!-- 编辑 sheet -->
+      <div class="sheet" style="left: 500px; top: 60px; width: 460px;">
+        <h3>编辑内容 <span style="font-weight:400;color:#8b95a1;font-size:12px;">· 文本</span></h3>
+        <div class="area">Q3 复盘会议纪要：核心指标环比 +12%
+下季度聚焦留存与付费转化
+—— 附件：dashboard.link</div>
+        <div class="hint">保存后重新识别类型与语言，并重算搜索索引；记录的最近使用时间会刷新。</div>
+        <div class="hint warn">⚠ 若编辑后的内容与库中另一条记录完全相同，两条将自动合并为一条（保留更早那条的收藏与置顶状态）。</div>
+        <div class="btns"><div class="btn ghost">取消</div><div class="btn pri">保存</div></div>
+      </div>
+
+      <!-- 合并 toast 示例 -->
+      <div class="panel" style="left: 40px; top: 300px; height: 140px;">
+        <div class="inner">
+          <div class="tabs" style="border-top:none;">
+            <div class="tab active">剪贴板 <span class="n">127</span></div>
+          </div>
+          <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="card"><div class="head">📄 文本 · 已命名</div><div class="body"><b style="color:#7fb0ff;">客户端发布检查清单</b><br><span style="color:#8b95a1;">build → test → archive → 上传 TestFlight …</span></div></div>
+            <div class="card"><div class="head">📄 文本</div><div class="body">会议改到周四下午 3 点…</div></div>
+            <div class="card"><div class="head">📄 文本</div><div class="body">已合并记录的时间刷新到最前</div></div>
+          </div>
+        </div>
+        <div class="toast" style="bottom: 10px;"><span class="ok">✓</span>内容已更新 · 搜索「检查清单」即可命中命名标题</div>
+      </div>
+      <div class="legend" style="left: 500px; top: 400px; width: 460px; text-align: center;">命名标题在列表中高亮显示；搜索命中命名标题与内容正文</div>
+    </div>
+  </section>
+
+  <!-- ================= 需求三 ================= -->
+  <section>
+    <h2><span class="no">③</span>重命名文件夹</h2>
+    <div class="desc">
+      顶部栏文件夹 chip 右键 →「重命名…」（也可管理：删除文件夹，条目自动移回「剪贴板」）。重命名即时生效并持久化。
+    </div>
+    <div class="scene" style="height: 300px;">
+      <div class="note">chip 右键菜单 + 重命名模态</div>
+      <div class="panel" style="left: 30px; top: 46px; height: 220px;">
+        <div class="inner">
+          <div class="search"><span class="mag">🔍</span><span class="ph">搜索剪贴板…</span></div>
+          <div class="tabs">
+            <div class="tab">剪贴板 <span class="n">127</span></div>
+            <div class="tab active">工作资料 <span class="n">12</span></div>
+            <div class="tab">灵感 <span class="n">3</span></div>
+            <div class="tab" style="opacity:.6;">＋</div>
+          </div>
+          <div class="grid"></div>
+        </div>
+        <div class="ctx" style="left: 176px; top: 92px;">
+          <div class="it hot"><span class="ic">R</span>重命名…</div>
+          <div class="sep"></div>
+          <div class="it danger"><span class="ic">🗑</span>删除文件夹</div>
+        </div>
+      </div>
+      <div class="arrow" style="left: 672px; top: 130px;">➜</div>
+      <div class="sheet" style="left: 740px; top: 80px;">
+        <h3>重命名文件夹「工作资料」</h3>
+        <label>名称</label>
+        <div class="input">客户项目</div>
+        <div class="hint">文件夹内的收藏条目不受影响；计数与排序保持不变。</div>
+        <div class="btns"><div class="btn ghost">取消</div><div class="btn pri">保存</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 技术方案 ================= -->
+  <section>
+    <h2>技术方案摘要</h2>
+    <table>
+      <tr><th style="width:120px;">层面</th><th>变更</th></tr>
+      <tr><td>DB 迁移 v4</td><td>
+        <code>removed_from_history INTEGER NOT NULL DEFAULT 0</code>（软删除标记）、
+        <code>title_is_custom INTEGER NOT NULL DEFAULT 0</code>（命名标记），追加式迁移，老库自动升级
+      </td></tr>
+      <tr><td>Rust Core 新增 API</td><td>
+        <code>remove_item_from_history(id) → RemovedOutcome { deleted | kept_in_board }</code>（按收藏状态自动选择软/硬删）<br>
+        <code>edit_text_item(id, new_text) → EditOutcome { item, merged }</code>（重算哈希 / 重分类 / 冲突自动合并）<br>
+        <code>rename_item(id, title)</code> · <code>rename_board(id, name)</code>
+      </td></tr>
+      <tr><td>查询规则</td><td>
+        默认「剪贴板」视图与全局搜索追加 <code>removed_from_history = 0</code> 过滤；文件夹视图不过滤；<br>
+        移出文件夹时若为软删除状态 → 物理删除；编辑后内容自动重跑 URL / 代码分类与语言识别
+      </td></tr>
+      <tr><td>Swift / UI</td><td>
+        右键菜单按视图与收藏状态切换「删除 / 从剪贴板移除」；重命名与编辑各一个 Sheet（⌘R / ⌘E）；<br>
+        chip 右键「重命名…」；软删除 toast 反馈；编辑合并时 toast 提示
+      </td></tr>
+      <tr><td>不变化</td><td>收藏豁免自动清理 / 历史上限的既有语义；图片 / 文件类记录不可编辑；去重、搜索索引机制</td></tr>
+    </table>
+  </section>
+
+  <!-- ================= 待确认 ================= -->
+  <section>
+    <h2>待确认的决策点</h2>
+    <div class="decision">
+      <h3>请确认以下 4 点（可直接回复编号 + 意见）</h3>
+      <ol>
+        <li>删除语义：在「剪贴板」删除已收藏条目 = 软删除（历史移除、收藏保留）；在<b>文件夹视图内删除 = 真删除</b>。<span class="rec">（推荐）</span>是否认可？</li>
+        <li>编辑冲突：编辑后的内容与已有记录完全相同时<b>自动合并</b>为一条，而不是报错阻止。<span class="rec">（推荐）</span>是否认可？</li>
+        <li>命名记录是否豁免自动清理与历史上限？方案默认<b>不豁免</b>（保持现有清理语义）；如希望命名即永久保留，请说明。</li>
+        <li>编辑入口限制在文本类记录（文本 / 代码 / 链接 / 其他）；图片与文件暂不支持编辑。<span class="rec">（推荐）</span>是否认可？</li>
+      </ol>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

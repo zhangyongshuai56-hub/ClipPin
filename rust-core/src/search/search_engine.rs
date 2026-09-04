@@ -54,6 +54,9 @@ fn search_fts(
     if let Some(board) = board_id {
         sql.push_str(format!(" AND clipboard_items.board_id = ?{}", values.len() + 1).as_str());
         values.push(Value::Integer(board));
+    } else {
+        // 默认视图搜索：排除已软删除的收藏条目
+        sql.push_str(" AND clipboard_items.removed_from_history = 0");
     }
     let limit_index = values.len() + 1;
     let offset_index = values.len() + 2;
@@ -102,6 +105,9 @@ fn search_like(
     if let Some(board) = board_id {
         sql.push_str(format!(" AND board_id = ?{}", values.len() + 1).as_str());
         values.push(Value::Integer(board));
+    } else {
+        // 默认视图搜索：排除已软删除的收藏条目
+        sql.push_str(" AND removed_from_history = 0");
     }
     let limit_index = values.len() + 1;
     let offset_index = values.len() + 2;

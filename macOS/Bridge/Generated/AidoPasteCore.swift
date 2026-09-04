@@ -593,7 +593,7 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
     func deleteBoard(id: Int64) throws 
     
     /**
-     * 删除单条。
+     * 删除单条（物理删除，含图片产物；文件夹视图内删除用这个）。
      */
     func deleteItem(id: Int64) throws 
     
@@ -601,6 +601,11 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
      * 批量删除，返回实际删除数。
      */
     func deleteItems(ids: [Int64]) throws  -> Int64
+    
+    /**
+     * 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
+     */
+    func editTextItem(id: Int64, newText: String) throws  -> EditOutcome
     
     /**
      * 历史条数上限（§50），返回清理条数。
@@ -636,6 +641,21 @@ public protocol AidoPasteDatabaseProtocol: AnyObject, Sendable {
      * Pin（§31）。
      */
     func pinItem(id: Int64) throws 
+    
+    /**
+     * 从「剪贴板」历史移除条目：未收藏物理删除；已收藏软删除、保留在文件夹中。
+     */
+    func removeItemFromHistory(id: Int64) throws  -> RemovalOutcome
+    
+    /**
+     * 重命名文件夹。
+     */
+    func renameBoard(id: Int64, name: String) throws 
+    
+    /**
+     * 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
+     */
+    func renameItem(id: Int64, title: String) throws 
     
     /**
      * 当前 schema 版本。
@@ -795,7 +815,7 @@ open func deleteBoard(id: Int64)throws   {try rustCallWithError(FfiConverterType
 }
     
     /**
-     * 删除单条。
+     * 删除单条（物理删除，含图片产物；文件夹视图内删除用这个）。
      */
 open func deleteItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
         uniffiCallStatus in
@@ -815,6 +835,20 @@ open func deleteItems(ids: [Int64])throws  -> Int64  {
     uniffi_aidopaste_core_fn_method_aidopastedatabase_delete_items(
             self.uniffiCloneHandle(),
         FfiConverterSequenceInt64.lower(ids),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
+     */
+open func editTextItem(id: Int64, newText: String)throws  -> EditOutcome  {
+    return try  FfiConverterTypeEditOutcome_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_edit_text_item(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterString.lower(newText),uniffiCallStatus
     )
 })
 }
@@ -907,6 +941,45 @@ open func pinItem(id: Int64)throws   {try rustCallWithError(FfiConverterTypeAido
     uniffi_aidopaste_core_fn_method_aidopastedatabase_pin_item(
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * 从「剪贴板」历史移除条目：未收藏物理删除；已收藏软删除、保留在文件夹中。
+     */
+open func removeItemFromHistory(id: Int64)throws  -> RemovalOutcome  {
+    return try  FfiConverterTypeRemovalOutcome_lift(try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_remove_item_from_history(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * 重命名文件夹。
+     */
+open func renameBoard(id: Int64, name: String)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_rename_board(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterString.lower(name),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
+     */
+open func renameItem(id: Int64, title: String)throws   {try rustCallWithError(FfiConverterTypeAidoPasteError_lift) {
+        uniffiCallStatus in
+    uniffi_aidopaste_core_fn_method_aidopastedatabase_rename_item(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterString.lower(title),uniffiCallStatus
     )
 }
 }
@@ -1208,6 +1281,75 @@ public func FfiConverterTypeClipboardItem_lift(_ buf: RustBuffer) throws -> Clip
 #endif
 public func FfiConverterTypeClipboardItem_lower(_ value: ClipboardItem) -> RustBuffer {
     return FfiConverterTypeClipboardItem.lower(value)
+}
+
+
+/**
+ * 编辑文本条目的结果。
+ */
+public struct EditOutcome: Equatable, Hashable {
+    /**
+     * 编辑后（或合并目标）的条目。
+     */
+    public var item: ClipboardItem
+    /**
+     * 编辑后内容与已有记录重复，已合并为本条。
+     */
+    public var merged: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * 编辑后（或合并目标）的条目。
+         */item: ClipboardItem, 
+        /**
+         * 编辑后内容与已有记录重复，已合并为本条。
+         */merged: Bool) {
+        self.item = item
+        self.merged = merged
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension EditOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEditOutcome: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EditOutcome {
+        return
+            try EditOutcome(
+                item: FfiConverterTypeClipboardItem.read(from: &buf), 
+                merged: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: EditOutcome, into buf: inout [UInt8]) {
+        FfiConverterTypeClipboardItem.write(value.item, into: &buf)
+        FfiConverterBool.write(value.merged, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEditOutcome_lift(_ buf: RustBuffer) throws -> EditOutcome {
+    return try FfiConverterTypeEditOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEditOutcome_lower(_ value: EditOutcome) -> RustBuffer {
+    return FfiConverterTypeEditOutcome.lower(value)
 }
 
 
@@ -1690,6 +1832,81 @@ public func FfiConverterTypeItemType_lower(_ value: ItemType) -> RustBuffer {
 
 
 /**
+ * 从「剪贴板」历史移除条目的结果（需求：删除保留收藏）。
+ */
+
+public enum RemovalOutcome: Equatable, Hashable {
+    
+    /**
+     * 未收藏：已物理删除。
+     */
+    case deleted
+    /**
+     * 已收藏：软删除，条目继续保留在所属文件夹中。
+     */
+    case keptInBoard
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RemovalOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemovalOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = RemovalOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemovalOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .deleted
+        
+        case 2: return .keptInBoard
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RemovalOutcome, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .deleted:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .keptInBoard:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemovalOutcome_lift(_ buf: RustBuffer) throws -> RemovalOutcome {
+    return try FfiConverterTypeRemovalOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemovalOutcome_lower(_ value: RemovalOutcome) -> RustBuffer {
+    return FfiConverterTypeRemovalOutcome.lower(value)
+}
+
+
+
+/**
  * 历史保留时长（§32）。
  */
 
@@ -1977,10 +2194,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_board() != 31403) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_item() != 7071) {
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_item() != 48317) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_delete_items() != 18760) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_edit_text_item() != 25178) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_enforce_history_limit() != 26802) {
@@ -2002,6 +2222,15 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_pin_item() != 23454) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_remove_item_from_history() != 19420) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_rename_board() != 64370) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_rename_item() != 35706) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_aidopaste_core_checksum_method_aidopastedatabase_schema_version() != 53774) {

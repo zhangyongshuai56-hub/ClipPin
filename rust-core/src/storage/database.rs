@@ -14,7 +14,8 @@ use crate::cleanup::cleanup_manager::Retention;
 use crate::clipboard::classifier;
 use crate::clipboard::dedup;
 use crate::clipboard::model::{
-    Board, ClipboardItem, ItemType, NewClipboardItem, Statistics, now_ms,
+    Board, ClipboardItem, EditOutcome, ItemType, NewClipboardItem, RemovalOutcome, Statistics,
+    now_ms,
 };
 use crate::error::{AidoPasteError, Result};
 use crate::storage::image_store::ImageStore;
@@ -26,7 +27,7 @@ type Artifacts = (Option<String>, Option<String>);
 const MAX_PAGE_SIZE: usize = 1000;
 
 /// 当前 schema 版本。
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// 迁移 SQL 列表，下标 `i` 对应目标版本 `i + 1`。
 /// 只允许追加新版本，禁止修改历史条目（§47）。
@@ -112,6 +113,15 @@ const MIGRATIONS: &[&str] = &[
 
     DROP INDEX IF EXISTS idx_clipboard_items_content_hash;
     CREATE UNIQUE INDEX idx_clipboard_items_content_hash_unique ON clipboard_items(content_hash);
+    ",
+    // v4：删除保留收藏 + 记录命名。
+    // removed_from_history：在「剪贴板」视图删除已收藏条目时置 1（软删除），
+    // 条目继续保留在所属文件夹中；默认视图与全局搜索排除该标记。
+    // title_is_custom：用户命名的标题，内容编辑 / 重新捕获时不重新派生。
+    "
+    ALTER TABLE clipboard_items ADD COLUMN removed_from_history INTEGER NOT NULL DEFAULT 0;
+
+    ALTER TABLE clipboard_items ADD COLUMN title_is_custom INTEGER NOT NULL DEFAULT 0;
     ",
 ];
 
@@ -284,7 +294,7 @@ impl Database {
     pub fn get_pinned_items(&self, limit: usize, offset: usize) -> Result<Vec<ClipboardItem>> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT * FROM clipboard_items WHERE is_pinned = 1
+            "SELECT * FROM clipboard_items WHERE is_pinned = 1 AND removed_from_history = 0
              ORDER BY updated_at DESC, id DESC LIMIT ?1 OFFSET ?2",
         )?;
         let rows = stmt.query_map(
@@ -367,6 +377,167 @@ impl Database {
 
     pub fn unpin_item(&self, id: i64) -> Result<()> {
         self.set_pinned(id, false)
+    }
+
+    /// 从「剪贴板」历史移除条目（需求：删除保留收藏）。
+    /// 未收藏条目物理删除（图片产物一并清理）；
+    /// 已收藏条目软删除（removed_from_history = 1 并取消置顶），继续保留在文件夹中，
+    /// 在所属文件夹视图内删除（[`Self::delete_item`]）才是真删除。
+    pub fn remove_item_from_history(&self, id: i64) -> Result<RemovalOutcome> {
+        let conn = self.lock_conn()?;
+        let board_id: Option<Option<i64>> = conn
+            .query_row(
+                "SELECT board_id FROM clipboard_items WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(board_id) = board_id else {
+            return Err(AidoPasteError::NotFound(id));
+        };
+        if board_id.is_some() {
+            conn.execute(
+                "UPDATE clipboard_items
+                 SET removed_from_history = 1, is_pinned = 0 WHERE id = ?1",
+                params![id],
+            )?;
+            log::info!(target: "aidopaste", "item soft-removed id={id}");
+            return Ok(RemovalOutcome::KeptInBoard);
+        }
+        let artifacts = fetch_artifacts(&conn, std::slice::from_ref(&id))?;
+        conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
+        drop(conn);
+        for (image_path, thumbnail_path) in artifacts {
+            self.image_store
+                .remove(image_path.as_deref(), thumbnail_path.as_deref());
+        }
+        log::info!(target: "aidopaste", "item deleted id={id}");
+        Ok(RemovalOutcome::Deleted)
+    }
+
+    /// 编辑文本条目内容（需求：编辑记录；仅文本类可编辑）。
+    /// 重跑分类（编辑可能改变性质：普通文本 ↔ URL ↔ 代码）并重算内容指纹；
+    /// 命名过的标题保留，未命名的重新派生。
+    /// 编辑后内容与库中另一条记录完全相同时自动合并：本条删除，目标条目刷新时间。
+    pub fn edit_text_item(&self, id: i64, new_text: &str) -> Result<EditOutcome> {
+        let text = new_text.trim();
+        if text.is_empty() {
+            return Err(AidoPasteError::InvalidInput(
+                "edited text must not be empty".into(),
+            ));
+        }
+        let conn = self.lock_conn()?;
+        let existing = conn
+            .query_row(
+                "SELECT * FROM clipboard_items WHERE id = ?1",
+                params![id],
+                row_to_item,
+            )
+            .optional()?
+            .ok_or(AidoPasteError::NotFound(id))?;
+        if !matches!(
+            existing.item_type,
+            ItemType::Text | ItemType::Url | ItemType::Code | ItemType::RichText | ItemType::Other
+        ) {
+            return Err(AidoPasteError::InvalidInput(
+                "only text-like items can be edited".into(),
+            ));
+        }
+
+        let classified = classifier::classify_text(text);
+        let url = (classified == ItemType::Url).then(|| text.to_string());
+        let metadata = match classifier::detect_code_language(text) {
+            Some(lang) => Some(with_language(existing.metadata.as_deref(), lang)),
+            None => without_metadata_key(existing.metadata.as_deref(), "language"),
+        };
+        let derive_source = NewClipboardItem {
+            item_type: classified,
+            text_content: Some(text.to_string()),
+            url: url.clone(),
+            ..Default::default()
+        };
+        let title = if existing.title_is_custom {
+            existing.title.clone()
+        } else {
+            derive_source.derive_title()
+        };
+        let preview = derive_source.derive_preview();
+        let content_hash = dedup::sha256_hex(text.as_bytes());
+        let now = now_ms();
+
+        // 与已有记录重复 → 合并：本条删除（防御性清理产物），目标条目 touch
+        let duplicate: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM clipboard_items WHERE content_hash = ?1 AND id != ?2",
+                params![content_hash, id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(kept_id) = duplicate {
+            let artifacts = fetch_artifacts(&conn, std::slice::from_ref(&id))?;
+            conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
+            conn.execute(
+                "UPDATE clipboard_items SET updated_at = ?2 WHERE id = ?1",
+                params![kept_id, now],
+            )?;
+            drop(conn);
+            for (image_path, thumbnail_path) in artifacts {
+                self.image_store
+                    .remove(image_path.as_deref(), thumbnail_path.as_deref());
+            }
+            log::info!(target: "aidopaste", "edit merged id={id} into id={kept_id}");
+            let item = self.get_item(kept_id)?;
+            return Ok(EditOutcome { item, merged: true });
+        }
+
+        let affected = conn.execute(
+            "UPDATE clipboard_items
+             SET type = ?2, text_content = ?3, url = ?4, title = ?5, preview = ?6,
+                 metadata = ?7, content_size = ?8, content_hash = ?9, updated_at = ?10
+             WHERE id = ?1",
+            params![
+                id,
+                classified.as_str(),
+                text,
+                url,
+                title,
+                preview,
+                metadata,
+                text.len() as i64,
+                content_hash,
+                now,
+            ],
+        )?;
+        if affected == 0 {
+            return Err(AidoPasteError::NotFound(id));
+        }
+        drop(conn);
+        log::info!(target: "aidopaste", "item edited id={id} size={}", text.len());
+        let item = self.get_item(id)?;
+        Ok(EditOutcome {
+            item,
+            merged: false,
+        })
+    }
+
+    /// 命名条目（需求：命名记录）：标题记为用户自定义，内容编辑 / 重新捕获不再覆盖。
+    pub fn rename_item(&self, id: i64, title: &str) -> Result<()> {
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            return Err(AidoPasteError::InvalidInput(
+                "title must not be empty".into(),
+            ));
+        }
+        let conn = self.lock_conn()?;
+        let affected = conn.execute(
+            "UPDATE clipboard_items
+             SET title = ?2, title_is_custom = 1, updated_at = ?3 WHERE id = ?1",
+            params![id, trimmed, now_ms()],
+        )?;
+        if affected == 0 {
+            return Err(AidoPasteError::NotFound(id));
+        }
+        Ok(())
     }
 
     fn set_pinned(&self, id: i64, pinned: bool) -> Result<()> {
@@ -520,6 +691,7 @@ impl Database {
     }
 
     /// 把条目移入文件夹（board_id = NULL 表示移回默认「剪贴板」）。
+    /// 移出文件夹时若条目此前已从历史软删除，将不再出现在任何视图，物理删除之。
     pub fn set_item_board(&self, item_id: i64, board_id: Option<i64>) -> Result<()> {
         let conn = self.lock_conn()?;
         if let Some(board) = board_id {
@@ -538,6 +710,30 @@ impl Database {
         )?;
         if affected == 0 {
             return Err(AidoPasteError::NotFound(item_id));
+        }
+        drop(conn);
+        if board_id.is_none() && self.get_item(item_id)?.removed_from_history {
+            self.delete_item(item_id)?;
+            log::info!(target: "aidopaste", "soft-removed item purged on board exit id={item_id}");
+        }
+        Ok(())
+    }
+
+    /// 重命名文件夹（需求：文件夹重命名）。
+    pub fn rename_board(&self, id: i64, name: &str) -> Result<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AidoPasteError::InvalidInput(
+                "board name must not be empty".into(),
+            ));
+        }
+        let conn = self.lock_conn()?;
+        let affected = conn.execute(
+            "UPDATE boards SET name = ?2 WHERE id = ?1",
+            params![id, trimmed],
+        )?;
+        if affected == 0 {
+            return Err(AidoPasteError::NotFound(id));
         }
         Ok(())
     }
@@ -732,6 +928,19 @@ fn with_language(metadata: Option<&str>, lang: &str) -> String {
     value.to_string()
 }
 
+/// 从 metadata JSON 中移除键（如编辑后不再是代码时清除 language）；原 metadata 非法时原样保留。
+fn without_metadata_key(metadata: Option<&str>, key: &str) -> Option<String> {
+    let raw = metadata?;
+    use serde_json::Value;
+    let Ok(mut json) = serde_json::from_str::<Value>(raw) else {
+        return Some(raw.to_string());
+    };
+    if let Value::Object(ref mut map) = json {
+        map.remove(key);
+    }
+    Some(json.to_string())
+}
+
 /// 按类型分页列出：置顶在前，其余按最近使用排序。
 pub(crate) fn list_items(
     conn: &Connection,
@@ -750,6 +959,9 @@ pub(crate) fn list_items(
     if let Some(board) = board_id {
         clauses.push("board_id = ?".into());
         values.push(Value::Integer(board));
+    } else {
+        // 默认「剪贴板」视图：排除已软删除的收藏条目（文件夹视图内仍可见）
+        clauses.push("removed_from_history = 0".into());
     }
     if !clauses.is_empty() {
         sql.push_str(" WHERE ");
@@ -790,6 +1002,8 @@ pub(crate) fn row_to_item(row: &Row) -> rusqlite::Result<ClipboardItem> {
         content_hash: row.get("content_hash")?,
         is_pinned: row.get::<_, i64>("is_pinned")? != 0,
         metadata: row.get("metadata")?,
+        removed_from_history: row.get::<_, i64>("removed_from_history")? != 0,
+        title_is_custom: row.get::<_, i64>("title_is_custom")? != 0,
     })
 }
 
@@ -868,5 +1082,135 @@ mod tests {
             with_language(Some("not json"), "sql"),
             r#"{"language":"sql"}"#
         );
+    }
+
+    #[test]
+    fn without_metadata_key_removes_only_target_key() {
+        assert_eq!(
+            without_metadata_key(Some(r#"{"language":"swift","a":1}"#), "language"),
+            Some(r#"{"a":1}"#.to_string())
+        );
+        // 无该键 / 非法 JSON 时不动
+        assert_eq!(
+            without_metadata_key(Some(r#"{"a":1}"#), "language"),
+            Some(r#"{"a":1}"#.to_string())
+        );
+        assert_eq!(
+            without_metadata_key(Some("not json"), "language"),
+            Some("not json".to_string())
+        );
+        assert_eq!(without_metadata_key(None, "language"), None);
+    }
+
+    fn text_item(text: &str) -> NewClipboardItem {
+        NewClipboardItem {
+            item_type: ItemType::Text,
+            text_content: Some(text.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn soft_remove_keeps_board_copy_and_purges_on_exit() {
+        let db = Database::open_in_memory().unwrap();
+        let item = db.create_item(text_item("收藏内容")).unwrap();
+        let board = db.create_board("工作", "#4F8EF7").unwrap();
+        db.set_item_board(item.id, Some(board.id)).unwrap();
+        db.pin_item(item.id).unwrap();
+
+        // 剪贴板视图删除 → 软删除：历史不见，文件夹仍在，置顶取消
+        assert_eq!(
+            db.remove_item_from_history(item.id).unwrap(),
+            RemovalOutcome::KeptInBoard
+        );
+        assert!(db.get_items(None, None, 50, 0).unwrap().is_empty());
+        assert!(db.get_pinned_items(50, 0).unwrap().is_empty());
+        let in_board = db.get_items(None, Some(board.id), 50, 0).unwrap();
+        assert_eq!(in_board.len(), 1);
+        assert!(in_board[0].removed_from_history);
+        assert!(!in_board[0].is_pinned);
+
+        // 移出文件夹 → 无处可见，物理删除
+        db.set_item_board(item.id, None).unwrap();
+        assert!(db.get_item(item.id).is_err());
+    }
+
+    #[test]
+    fn remove_unpinned_history_item_deletes_physically() {
+        let db = Database::open_in_memory().unwrap();
+        let item = db.create_item(text_item("普通内容")).unwrap();
+        assert_eq!(
+            db.remove_item_from_history(item.id).unwrap(),
+            RemovalOutcome::Deleted
+        );
+        assert!(db.get_item(item.id).is_err());
+    }
+
+    #[test]
+    fn edit_reclassifies_and_keeps_custom_title() {
+        let db = Database::open_in_memory().unwrap();
+        let item = db.create_item(text_item("普通一句话")).unwrap();
+        db.rename_item(item.id, "我的链接").unwrap();
+
+        // 编辑成 URL：类型重判为 url，命名标题保留
+        let outcome = db.edit_text_item(item.id, "https://apple.com").unwrap();
+        assert!(!outcome.merged);
+        assert_eq!(outcome.item.item_type, ItemType::Url);
+        assert_eq!(outcome.item.title.as_deref(), Some("我的链接"));
+        assert!(outcome.item.title_is_custom);
+        assert_eq!(outcome.item.url.as_deref(), Some("https://apple.com"));
+        // 按新类型可被搜到
+        assert_eq!(
+            db.search_items("apple", None, None, 50, 0).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn edit_merges_into_existing_duplicate() {
+        let db = Database::open_in_memory().unwrap();
+        let keep = db.create_item(text_item("独特的内容")).unwrap();
+        let edit = db.create_item(text_item("将被改成重复的草稿")).unwrap();
+        db.pin_item(edit.id).unwrap();
+
+        let outcome = db.edit_text_item(edit.id, "独特的内容").unwrap();
+        assert!(outcome.merged);
+        assert_eq!(outcome.item.id, keep.id);
+        assert!(db.get_item(edit.id).is_err());
+        // 编辑条目的置顶随合并消失，目标条目仍然存在
+        assert!(db.get_pinned_items(50, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn edit_rejects_non_text_and_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let item = db.create_item(text_item("普通一句话")).unwrap();
+        assert!(db.edit_text_item(item.id, "   ").is_err());
+
+        // 图片条目不可编辑
+        let source = tempfile::tempdir().unwrap();
+        let png = source.path().join("a.png");
+        image::RgbImage::from_pixel(4, 4, image::Rgb([1, 2, 3]))
+            .save_with_format(&png, image::ImageFormat::Png)
+            .unwrap();
+        let image_item = db
+            .create_item(NewClipboardItem {
+                item_type: ItemType::Image,
+                image_source_path: Some(png.to_string_lossy().into_owned()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(db.edit_text_item(image_item.id, "新内容").is_err());
+    }
+
+    #[test]
+    fn rename_board_updates_name() {
+        let db = Database::open_in_memory().unwrap();
+        let board = db.create_board("旧名字", "#4F8EF7").unwrap();
+        db.rename_board(board.id, "新名字").unwrap();
+        let boards = db.list_boards().unwrap();
+        assert_eq!(boards[0].name, "新名字");
+        assert!(db.rename_board(board.id, "  ").is_err());
+        assert!(db.rename_board(999, "x").is_err());
     }
 }

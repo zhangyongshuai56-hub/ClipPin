@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use crate::cleanup::cleanup_manager::Retention as CoreRetention;
 use crate::clipboard::model::{
-    ClipboardItem as CoreClipboardItem, ItemType as CoreItemType, NewClipboardItem as CoreNewItem,
+    ClipboardItem as CoreClipboardItem, EditOutcome as CoreEditOutcome, ItemType as CoreItemType,
+    NewClipboardItem as CoreNewItem, RemovalOutcome as CoreRemovalOutcome,
     Statistics as CoreStatistics,
 };
 use crate::error::AidoPasteError as CoreError;
@@ -170,6 +171,42 @@ pub struct Board {
     pub name: String,
     pub color: String,
     pub position: i64,
+}
+
+/// 从「剪贴板」历史移除条目的结果（需求：删除保留收藏）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum RemovalOutcome {
+    /// 未收藏：已物理删除。
+    Deleted,
+    /// 已收藏：软删除，条目继续保留在所属文件夹中。
+    KeptInBoard,
+}
+
+impl From<CoreRemovalOutcome> for RemovalOutcome {
+    fn from(value: CoreRemovalOutcome) -> Self {
+        match value {
+            CoreRemovalOutcome::Deleted => Self::Deleted,
+            CoreRemovalOutcome::KeptInBoard => Self::KeptInBoard,
+        }
+    }
+}
+
+/// 编辑文本条目的结果。
+#[derive(Debug, Clone, Record)]
+pub struct EditOutcome {
+    /// 编辑后（或合并目标）的条目。
+    pub item: ClipboardItem,
+    /// 编辑后内容与已有记录重复，已合并为本条。
+    pub merged: bool,
+}
+
+impl From<CoreEditOutcome> for EditOutcome {
+    fn from(value: CoreEditOutcome) -> Self {
+        Self {
+            item: value.item.into(),
+            merged: value.merged,
+        }
+    }
 }
 
 /// 类型计数（统计用；避免向 Swift 暴露 HashMap，§81）。
@@ -391,9 +428,29 @@ impl AidoPasteDatabase {
         Ok(self.db.set_item_board(id, board_id)?)
     }
 
-    /// 删除单条。
+    /// 删除单条（物理删除，含图片产物；文件夹视图内删除用这个）。
     pub fn delete_item(&self, id: i64) -> Result<(), AidoPasteError> {
         Ok(self.db.delete_item(id)?)
+    }
+
+    /// 从「剪贴板」历史移除条目：未收藏物理删除；已收藏软删除、保留在文件夹中。
+    pub fn remove_item_from_history(&self, id: i64) -> Result<RemovalOutcome, AidoPasteError> {
+        Ok(self.db.remove_item_from_history(id)?.into())
+    }
+
+    /// 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
+    pub fn edit_text_item(&self, id: i64, new_text: String) -> Result<EditOutcome, AidoPasteError> {
+        Ok(self.db.edit_text_item(id, &new_text)?.into())
+    }
+
+    /// 命名条目：标题记为用户自定义，后续内容变更不再覆盖。
+    pub fn rename_item(&self, id: i64, title: String) -> Result<(), AidoPasteError> {
+        Ok(self.db.rename_item(id, &title)?)
+    }
+
+    /// 重命名文件夹。
+    pub fn rename_board(&self, id: i64, name: String) -> Result<(), AidoPasteError> {
+        Ok(self.db.rename_board(id, &name)?)
     }
 
     /// 批量删除，返回实际删除数。
@@ -445,7 +502,7 @@ mod tests {
     #[test]
     fn ffi_surface_roundtrip_search_pin_statistics() {
         let db = AidoPasteDatabase::open_in_memory().unwrap();
-        assert_eq!(db.schema_version().unwrap(), 3);
+        assert_eq!(db.schema_version().unwrap(), 4);
 
         let created = db
             .create_item(NewClipboardItem {
@@ -492,5 +549,39 @@ mod tests {
         let db = AidoPasteDatabase::open_in_memory().unwrap();
         let error = db.get_items(None, None, -1, 0).unwrap_err();
         assert!(matches!(error, AidoPasteError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn ffi_soft_remove_and_rename_board() {
+        let db = AidoPasteDatabase::open_in_memory().unwrap();
+        let created = db
+            .create_item(NewClipboardItem {
+                item_type: ItemType::Text,
+                text_content: Some("收藏条目".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let board = db.create_board("工作".into(), "#4F8EF7".into()).unwrap();
+        db.set_item_board(created.id, Some(board.id)).unwrap();
+
+        // 剪贴板视图删除：软删除，历史搜索不再命中，文件夹内仍可列出
+        assert_eq!(
+            db.remove_item_from_history(created.id).unwrap(),
+            RemovalOutcome::KeptInBoard
+        );
+        assert!(
+            db.search_items("收藏".into(), None, None, 50, 0)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(db.get_items(None, Some(board.id), 50, 0).unwrap().len(), 1);
+
+        // 命名 + 重命名文件夹
+        db.rename_item(created.id, "我的命名".into()).unwrap();
+        db.rename_board(board.id, "客户项目".into()).unwrap();
+        let renamed = db.get_item(created.id).unwrap();
+        assert_eq!(renamed.title.as_deref(), Some("我的命名"));
+        let boards = db.list_boards().unwrap();
+        assert_eq!(boards[0].name, "客户项目");
     }
 }
