@@ -166,9 +166,6 @@ private struct ClipboardSettingsView: View {
                     Text(DefaultPasteAction.clipboard.title).tag(DefaultPasteAction.clipboard.rawValue)
                 }
                 .pickerStyle(.radioGroup)
-                .onChange(of: defaultActionRaw) {
-                    Task { await CleanupScheduler.shared.runOnce() }
-                }
                 Text(DefaultPasteAction(rawValue: defaultActionRaw)?.detail ?? "")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -201,6 +198,12 @@ private struct ClipboardSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        // 关闭设置窗口时若仍在录制快捷键，移除监视器，避免它继续吞掉应用内所有按键
+        .onDisappear {
+            if isRecording {
+                stopRecording()
+            }
+        }
         .onChange(of: retentionRaw) {
             Task { await CleanupScheduler.shared.runOnce() }
         }

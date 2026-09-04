@@ -139,7 +139,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         }
     }
 
-    /// 需求 §6：点击窗口外部关闭。带 600ms 宽限期防误关；粘贴进行中不关闭。
+    /// 需求 §6：点击窗口外部关闭。1.5s 宽限期防误关（呼出后焦点可能被短暂抢回）；粘贴进行中不关闭。
     private func installResignObserverIfNeeded() {
         guard resignObserver == nil else { return }
         resignObserver = NotificationCenter.default.addObserver(

@@ -1,6 +1,7 @@
 //! 集成测试：创建 → 去重 → 分类 → 搜索 → Pin → 清理 → 统计 → 持久化。
 //! 覆盖 §68（数据库/去重/分类/搜索/清理）与 §70 的 Core 侧场景。
 
+use aidopaste_core::storage::database::SCHEMA_VERSION;
 use aidopaste_core::{CleanupManager, Database, ItemType, NewClipboardItem, Retention};
 
 fn text(content: &str) -> NewClipboardItem {
@@ -307,7 +308,7 @@ fn data_persists_across_reopen() {
 
     let created_id = {
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 2);
+        assert_eq!(db.schema_version().unwrap(), SCHEMA_VERSION);
         let item = db
             .create_item(source("跨重启保留的内容", "com.apple.Safari"))
             .unwrap();
@@ -316,7 +317,7 @@ fn data_persists_across_reopen() {
 
     // 重新打开：数据完好，版本不重复迁移
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.schema_version().unwrap(), 2);
+    assert_eq!(db.schema_version().unwrap(), SCHEMA_VERSION);
     let items = db.get_items(None, None, 100, 0).unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, created_id);

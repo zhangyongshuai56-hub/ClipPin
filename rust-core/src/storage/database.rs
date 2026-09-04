@@ -26,7 +26,7 @@ type Artifacts = (Option<String>, Option<String>);
 const MAX_PAGE_SIZE: usize = 1000;
 
 /// 当前 schema 版本。
-const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// 迁移 SQL 列表，下标 `i` 对应目标版本 `i + 1`。
 /// 只允许追加新版本，禁止修改历史条目（§47）。
@@ -97,6 +97,21 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE clipboard_items ADD COLUMN board_id INTEGER;
 
     CREATE INDEX idx_clipboard_items_board ON clipboard_items(board_id);
+    ",
+    // v3：content_hash 唯一约束——应用层去重之外的最后一道防线。
+    // 先清掉历史重复行（保留 updated_at 最新，平局取 id 大），
+    // 再用唯一索引替代 v1 的普通索引。
+    "
+    DELETE FROM clipboard_items
+    WHERE EXISTS (
+        SELECT 1 FROM clipboard_items AS d
+        WHERE d.content_hash = clipboard_items.content_hash
+          AND (d.updated_at > clipboard_items.updated_at
+               OR (d.updated_at = clipboard_items.updated_at AND d.id > clipboard_items.id))
+    );
+
+    DROP INDEX IF EXISTS idx_clipboard_items_content_hash;
+    CREATE UNIQUE INDEX idx_clipboard_items_content_hash_unique ON clipboard_items(content_hash);
     ",
 ];
 
@@ -468,17 +483,22 @@ impl Database {
     }
 
     /// 删除文件夹：其中条目回到默认「剪贴板」（board_id 置空），条目本身不删除。
+    /// 条目释放与文件夹删除同事务，失败整体回滚。
     pub fn delete_board(&self, id: i64) -> Result<()> {
-        let conn = self.lock_conn()?;
-        let affected_items = conn.execute(
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let released = tx.execute(
             "UPDATE clipboard_items SET board_id = NULL WHERE board_id = ?1",
             params![id],
         )?;
-        let affected = conn.execute("DELETE FROM boards WHERE id = ?1", params![id])?;
+        let affected = tx.execute("DELETE FROM boards WHERE id = ?1", params![id])?;
         if affected == 0 {
+            // tx drop 即回滚：条目释放不会半途生效
             return Err(AidoPasteError::NotFound(id));
         }
-        log::info!(target: "aidopaste", "board deleted id={id} items_released={affected_items}");
+        tx.commit()?;
+        drop(conn);
+        log::info!(target: "aidopaste", "board deleted id={id} items_released={released}");
         Ok(())
     }
 
@@ -813,6 +833,27 @@ mod tests {
     fn in_memory_database_reaches_latest_version() {
         let db = Database::open_in_memory().unwrap();
         assert_eq!(db.schema_version().unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn content_hash_is_unique_at_schema_level() {
+        let db = Database::open_in_memory().unwrap();
+        let conn = db.lock_conn().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items (type, created_at, updated_at, content_size, content_hash)
+             VALUES ('text', 1, 1, 0, 'dup-hash')",
+            [],
+        )
+        .unwrap();
+        let second = conn.execute(
+            "INSERT INTO clipboard_items (type, created_at, updated_at, content_size, content_hash)
+             VALUES ('text', 2, 2, 0, 'dup-hash')",
+            [],
+        );
+        assert!(
+            second.is_err(),
+            "duplicate content_hash must violate unique index"
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import Observation
+import os
 
 /// 操作反馈状态（需求 §18）：执行后必须有明确反馈，不静默。
 enum OperationFeedback: Equatable {
@@ -70,6 +71,11 @@ final class ClipboardViewModel {
     /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
 
+    /// 加载代数：防抖搜索与实时刷新并发时，只让最新一次的结果生效。
+    private var loadGeneration = 0
+
+    private let logger = Logger(subsystem: "com.aidopaste.app", category: "clipboard-ui")
+
     /// 分页（§58）。
     private let pageSize = 50
 
@@ -111,7 +117,8 @@ final class ClipboardViewModel {
     }
 
     private func load(reset: Bool) async {
-        guard !isLoading else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoading = true
         defer { isLoading = false }
 
@@ -132,6 +139,8 @@ final class ClipboardViewModel {
                     offset: offset
                 )
             }
+            // 过期的加载（期间用户又输入了新词 / 切换了文件夹）直接丢弃
+            guard generation == loadGeneration else { return }
             if reset {
                 entries = page
             } else {
@@ -140,6 +149,7 @@ final class ClipboardViewModel {
             canLoadMore = page.count == pageSize
             fixSelection()
         } catch {
+            guard generation == loadGeneration else { return }
             setError(error)
         }
     }
@@ -256,6 +266,8 @@ final class ClipboardViewModel {
         }
         guard pasted else {
             PasteService.shared.isBusy = false
+            // 失败也必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
+            PasteService.shared.restore(snapshot)
             showFeedback(.failed("无法粘贴到当前应用"), autoClearAfter: .seconds(3))
             return
         }
@@ -282,11 +294,7 @@ final class ClipboardViewModel {
         case .text, .code, .richText, .url, .other:
             // 纯文本开关：URL / 富文本也只写纯文本
             if let text = entry.textContent ?? entry.url {
-                if forcePlainText || entry.itemType != .url {
-                    success = pasteboard.setString(text, forType: .string)
-                } else {
-                    success = pasteboard.setString(text, forType: .string)
-                }
+                success = pasteboard.setString(text, forType: .string)
             } else {
                 success = false
             }
@@ -299,10 +307,18 @@ final class ClipboardViewModel {
                 success = false
             }
         case .image:
+            // 直接写原始图片字节，保留原格式（NSImage.writeObjects 会统一转成 TIFF）
             if forcePlainText {
                 success = false
-            } else if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
-                success = pasteboard.writeObjects([image])
+            } else if let path = entry.imagePath {
+                let url = URL(fileURLWithPath: path)
+                let type: NSPasteboard.PasteboardType =
+                    url.pathExtension.lowercased() == "png" ? .png : .tiff
+                if let data = try? Data(contentsOf: url) {
+                    success = pasteboard.setData(data, forType: type)
+                } else {
+                    success = false
+                }
             } else {
                 success = false
             }
@@ -314,7 +330,12 @@ final class ClipboardViewModel {
         // §18：自家写入不再被监听捕获；同时通过去重 touch 刷新最近使用时间
         ClipboardChangeGate.shared.suppress(pasteboard.changeCount)
         Task {
-            _ = try? await repository.create(entry.toNewItem())
+            do {
+                _ = try await repository.create(entry.toNewItem())
+            } catch {
+                // touch 失败只影响排序，不提示用户
+                logger.error("touch on copy failed: \(error.localizedDescription, privacy: .public)")
+            }
             await load(reset: true)
         }
         return true

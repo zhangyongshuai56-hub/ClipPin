@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn ffi_surface_roundtrip_search_pin_statistics() {
         let db = AidoPasteDatabase::open_in_memory().unwrap();
-        assert_eq!(db.schema_version().unwrap(), 2);
+        assert_eq!(db.schema_version().unwrap(), 3);
 
         let created = db
             .create_item(NewClipboardItem {

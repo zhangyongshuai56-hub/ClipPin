@@ -10,6 +10,9 @@ enum ExcludedApps {
         "com.agilebits.onepassword7",
         "com.agilebits.onepassword8",
         "com.apple.KeychainAccess",
+        "com.apple.Passwords",
+        "org.keepassx.keepassxc",
+        "com.bitwarden.desktop",
     ]
 
     /// 用户自定义列表（持久化于 UserDefaults，Phase 11 提供 UI）。

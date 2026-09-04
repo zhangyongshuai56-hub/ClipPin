@@ -11,8 +11,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Task {
             await CoreStore.shared.bootstrap()
-            // bootstrap 失败时 repository 为 nil，错误已由 CoreStore 记录并在设置页呈现
-            guard let repository = CoreStore.shared.repository else { return }
+            // §53：失败必须可见——数据库不可用时弹窗说明，而不是菜单栏点击无响应
+            guard let repository = CoreStore.shared.repository else {
+                if let error = CoreStore.shared.startupError {
+                    let alert = NSAlert()
+                    alert.alertStyle = .critical
+                    alert.messageText = "AidoPaste 数据库初始化失败"
+                    alert.informativeText = error.errorDescription ?? "请重启应用再试。"
+                    alert.addButton(withTitle: "好")
+                    alert.runModal()
+                }
+                return
+            }
             let monitor = ClipboardMonitor(appState: appState, repository: repository)
             monitor.start()
             clipboardMonitor = monitor

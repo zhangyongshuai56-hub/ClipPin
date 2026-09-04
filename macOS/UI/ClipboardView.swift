@@ -243,7 +243,7 @@ struct ClipboardView: View {
         }
         Button("复制到剪贴板") { viewModel.copyToClipboard(entry) }
         Divider()
-        if let currentBoard = viewModel.selectedBoardID {
+        if viewModel.selectedBoardID != nil {
             Button("移出当前文件夹") {
                 Task { await viewModel.move(entry, toBoard: nil) }
             }
@@ -331,7 +331,33 @@ struct ClipboardView: View {
         guard let window = NSApp.keyWindow, window is ClipboardWindow else { return event }
 
         let commandPressed = event.modifierFlags.contains(.command)
-        let characters = (event.charactersIgnoringModifiers ?? "").lowercased()
+
+        // 搜索框等文本编辑获得焦点时，编辑键（Backspace / ←→ / ⌘C / 字符输入）
+        // 必须交还给 field editor，否则 Backspace 会误删选中的剪贴板条目。
+        // 只保留 Enter 与 Esc 的面板级语义。
+        if window.firstResponder is NSTextView {
+            switch event.keyCode {
+            case 36, 76: // Enter：默认操作；⌘Enter：始终粘贴到当前应用
+                guard let entry = viewModel.selectedEntry else { return event }
+                if commandPressed {
+                    Task { await viewModel.pasteToActiveApplication(entry) }
+                } else {
+                    Task { await viewModel.performDefaultAction(entry) }
+                }
+                return nil
+            case 53: // Esc：搜索中先清空 → 退出搜索 → 关闭面板
+                if !viewModel.searchText.isEmpty {
+                    viewModel.searchText = ""
+                } else if isSearching {
+                    isSearching = false
+                } else {
+                    WindowManager.shared.hideClipboardWindow()
+                }
+                return nil
+            default:
+                return event
+            }
+        }
 
         switch event.keyCode {
         case 123: // ←

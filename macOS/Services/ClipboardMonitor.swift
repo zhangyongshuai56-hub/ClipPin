@@ -57,10 +57,14 @@ final class ClipboardMonitor {
     /// 对应的 changeCount；抑制表由 ClipboardChangeGate 统一管理。
 
     private func checkOnce() {
-        // §40：暂停时不记录
-        guard !appState.isPaused else { return }
-
         let changeCount = NSPasteboard.general.changeCount
+
+        // §40：暂停时不记录。同步推进基线，否则恢复后会把暂停期间的变更补录入库
+        if appState.isPaused {
+            lastChangeCount = changeCount
+            return
+        }
+
         guard changeCount != lastChangeCount else { return }
 
         // §18：自家写入导致的变更，只更新基线不捕获

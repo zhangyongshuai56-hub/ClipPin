@@ -66,7 +66,6 @@ pub fn detect_code_language(text: &str) -> Option<&'static str> {
         "extension ",
         "protocol ",
         "@main",
-        "?",
     ];
     const PYTHON: &[&str] = &[
         "def ", "import ", "from ", "print(", "self.", "__name__", "elif ", "raise ",
@@ -182,6 +181,8 @@ mod tests {
             classify_text("今天天气不错，适合出去走走。"),
             ItemType::Text
         );
+        // "let " + 问号这类组合不应被认成 Swift 代码（"?" 曾是特征词）
+        assert_eq!(classify_text("let me know, ok?"), ItemType::Text);
     }
 
     #[test]

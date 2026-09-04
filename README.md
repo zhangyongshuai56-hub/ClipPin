@@ -13,6 +13,9 @@
 
 ## 构建
 
+环境要求：Xcode 16+（macOS 15 SDK）与 Rust stable（edition 2024 需 1.85+），
+Rust 经 rustup 安装：`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`。
+
 ```bash
 xcodebuild -scheme AidoPaste -configuration Debug -derivedDataPath .build/DerivedData build
 ```
@@ -141,7 +144,18 @@ Phase 13 已完成（UI 打磨）：
 - 隐藏路径统一为 Esc / 快捷键 toggle / Quick Paste（稳定性优先）
 
 全部 13 个 Phase 完成。技术栈：SwiftUI + AppKit + Rust Core + SQLite(FTS5) + UniFFI；
-53 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
+57 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
+
+## 2026-09-04 修复
+
+- 键盘：搜索框输入时 Backspace / ←→ / ⌘C 交还输入框，不再误删选中条目（Enter / Esc 保留面板语义）
+- 隐私：「暂停记录」期间同步推进 changeCount 基线，恢复后不再把暂停期间的内容补录入库
+- Quick Paste：呼出时前台是本应用不再把自己当粘贴目标；注入 ⌘V 前校验焦点已落在目标应用；粘贴失败路径恢复用户原剪贴板快照
+- 复制：图片条目直接写原始字节（不再转 TIFF）；重新复制图片经 Core 去重刷新时间（此前 touch 静默失败）
+- 设置：移除切换「默认操作」时误触发的清理轮；关闭设置窗口时移除快捷键录制监视器
+- 可靠性：数据库初始化失败改为弹窗可见；删除文件夹改单事务；schema v3 为 content_hash 加唯一索引（迁移自动清理历史重复行）；列表并发加载只让最新结果生效
+- 分类器：移除 "?" 特征词，普通问句不再误判为 Swift 代码
+- 隐私设置：内置排除应用补充 密码.app / KeePassXC / Bitwarden
 
 ## Paste 式底部面板（交互升级，见 design/panel-preview.png）
 
@@ -158,5 +172,5 @@ Phase 13 已完成（UI 打磨）：
 - 右键条目 →「移入文件夹」/「移出当前文件夹」；文件夹内条目豁免自动清理与历史上限
 - 设置 → 剪贴板 →「粘贴项目」：默认操作（到当前活动应用 / 到剪贴板）+ 始终以纯文本粘贴
 - Enter / 双击执行默认操作；⌘Enter 始终粘贴到当前应用；⌘C 复制到剪贴板
-- DB schema v2：boards 表 + clipboard_items.board_id（迁移自动执行）
+- DB schema v2：boards 表 + clipboard_items.board_id；v3：content_hash 唯一索引（迁移自动执行）
 

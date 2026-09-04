@@ -181,7 +181,8 @@ private func carbonEventCallback(
     _ event: EventRef?,
     _ userData: UnsafeMutableRawPointer?
 ) -> OSStatus {
-    guard let event, let userData else {
+    // 只注册了热键按下事件，无需解包检查事件内容
+    guard event != nil, let userData else {
         return CallNextEventHandler(nextHandler, event)
     }
     let box = Unmanaged<HotKeyContextBox>.fromOpaque(userData).takeUnretainedValue()

@@ -30,7 +30,8 @@ final class CleanupScheduler {
                 self.scheduleRun()
             }
         }
-        RunLoop.main.add(timer, forMode: .default)
+        // .common：菜单展开等 UI 阻塞模式下定时仍触发（与 ClipboardMonitor 一致）
+        RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         logger.info("cleanup scheduler started interval=\(Self.interval, privacy: .public)")
     }

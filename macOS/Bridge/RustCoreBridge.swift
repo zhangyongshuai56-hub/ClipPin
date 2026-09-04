@@ -132,7 +132,9 @@ extension ClipboardEntry {
         item.textContent = textContent
         item.url = url
         item.filePath = filePath
-        item.imageSourcePath = nil
+        // Core 校验要求至少一种载荷；图片条目传已存原图路径，
+        // Core 按图片字节重算哈希即可命中已有条目走去重 touch（不会重复转存）
+        item.imageSourcePath = itemType == .image ? imagePath : nil
         item.uti = uti
         item.createdAt = createdAt
         item.metadata = metadata

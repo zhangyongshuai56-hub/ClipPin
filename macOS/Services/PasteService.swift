@@ -40,8 +40,10 @@ final class PasteService {
     // MARK: - 粘贴目标
 
     /// WindowManager 显示剪贴板窗口前调用：记录粘贴目标应用。
+    /// §13：不能把自己当目标——从菜单栏呼出时前台就是本应用，此时无可粘贴目标。
     func noteWindowAboutToShow() {
-        previousApp = NSWorkspace.shared.frontmostApplication
+        let front = NSWorkspace.shared.frontmostApplication
+        previousApp = (front?.bundleIdentifier == Bundle.main.bundleIdentifier) ? nil : front
     }
 
     // MARK: - 剪贴板快照（§37：用户原来的 Clipboard 不能被破坏）
@@ -77,6 +79,10 @@ final class PasteService {
             logger.error("quick paste aborted: no previous app recorded")
             return false
         }
+        guard previous.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            logger.error("quick paste aborted: target is self")
+            return false
+        }
         hideWindow()
         // 由当前应用发起协作式激活，把焦点让渡给粘贴目标
         let activated = previous.activate(from: .current)
@@ -86,6 +92,11 @@ final class PasteService {
         }
         // 给目标应用一点完成激活的时间，再注入按键
         try? await Task.sleep(for: .milliseconds(250))
+        // 焦点没落在目标应用上时，⌘V 会打进错误窗口；宁可失败让上层恢复快照
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == previous.processIdentifier else {
+            logger.error("quick paste aborted: focus did not settle on target app")
+            return false
+        }
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true) else {
             return false
         }
