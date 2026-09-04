@@ -20,6 +20,9 @@ struct MenuBarContentView: View {
         Divider()
         Button("设置…") {
             openSettings()
+            // accessory 应用打开窗口不会自动置前：显式激活，否则设置窗口会被
+            // 当前前台应用的窗口盖住（且无 Dock 图标、不在 ⌘Tab 里，难以找回）
+            NSApp.activate(ignoringOtherApps: true)
         }
         Button("退出 Paste") {
             NSApp.terminate(nil)
