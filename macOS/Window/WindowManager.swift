@@ -45,7 +45,19 @@ final class WindowManager: NSObject, NSWindowDelegate {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
-        panelHadKeyFocus = window.isKeyWindow
+        // 激活重试：macOS 可能拒绝后台激活或焦点被前一个应用抢回，
+        // 短间隔重试两次，修复「按两次才呼出」
+        for delay in [0.1, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if !(window.isKeyWindow && NSApp.isActive) {
+                    NSApp.activate(ignoringOtherApps: true)
+                    window.makeKeyAndOrderFront(nil)
+                    window.makeKey()
+                }
+                self.panelHadKeyFocus = self.panelHadKeyFocus || window.isKeyWindow
+            }
+        }
+        logger.info("panel shown: key=\(window.isKeyWindow) active=\(NSApp.isActive)")
         // 需求 §7：呼出后搜索框默认聚焦，可直接输入
         if focusSearch, let viewModel {
             viewModel.requestSearchFocus()
@@ -53,10 +65,20 @@ final class WindowManager: NSObject, NSWindowDelegate {
         installResignObserverIfNeeded()
     }
 
-    /// 全局快捷键行为（§26）：未显示 → 呼出并聚焦搜索；已显示 → 隐藏。
+    /// 全局快捷键行为（§26）：未显示 → 呼出并聚焦搜索；有焦点 → 隐藏；
+    /// 可见但无焦点（被其他应用抢回焦点）→ 重新激活而不是误隐藏。
     func toggleClipboardWindow() {
         if let window = clipboardWindow, window.isVisible {
-            hideClipboardWindow()
+            if window.isKeyWindow && NSApp.isActive {
+                logger.info("toggle: visible+key → hide")
+                hideClipboardWindow()
+            } else {
+                logger.info("toggle: visible without key → re-activate")
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                window.makeKey()
+                panelHadKeyFocus = window.isKeyWindow
+            }
         } else {
             showClipboardWindow()
         }
@@ -100,8 +122,9 @@ final class WindowManager: NSObject, NSWindowDelegate {
             guard let screen = sender.screen ?? NSScreen.main else { return }
             let visible = screen.visibleFrame
             let margin: CGFloat = 24
-            size.width = min(max(size.width, ClipboardWindow.minContentSize.width), visible.width - margin * 2)
-            size.height = min(max(size.height, ClipboardWindow.minContentSize.height), visible.height - margin * 2)
+            // 只钳制上限（不超出屏幕）；最小尺寸不限制（用户要求）
+            size.width = min(size.width, visible.width - margin * 2)
+            size.height = min(size.height, visible.height - margin * 2)
         }
         return size
     }
@@ -126,8 +149,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let window = self.clipboardWindow, window.isVisible else { return }
-                // 宽限期：呼出瞬间的小失活不关（需求 §6 防误关）
-                guard Date().timeIntervalSince(self.shownAt) > 0.6 else { return }
+                // 宽限期：呼出后焦点可能被前一个应用短暂抢回，1.5s 内不失活关闭
+                guard Date().timeIntervalSince(self.shownAt) > 1.5 else { return }
                 // Quick Paste 进行中不关（激活目标应用会触发失活）
                 guard !PasteService.shared.isBusy else { return }
                 // 呼出时未获得焦点（如系统拒绝后台激活）→ 失活不关，面板仍可点击使用
@@ -163,7 +186,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
             return ClipboardWindow.defaultContentSize
         }
         let parts = text.split(separator: "x").compactMap { Double($0) }
-        guard parts.count == 2, parts[0] >= 700, parts[1] >= 300 else {
+        guard parts.count == 2, parts[0] >= 60, parts[1] >= 60 else {
             return ClipboardWindow.defaultContentSize
         }
         return NSSize(width: parts[0], height: parts[1])

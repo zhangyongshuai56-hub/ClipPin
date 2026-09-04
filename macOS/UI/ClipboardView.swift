@@ -27,10 +27,7 @@ struct ClipboardView: View {
             topBar
             Divider()
             shelfArea
-            Divider()
-            StatusFooter(defaultAction: PasteSettings.defaultAction, totalCount: viewModel.entries.count)
         }
-        .frame(minWidth: ClipboardWindow.minContentSize.width, minHeight: ClipboardWindow.minContentSize.height)
         .preferredColorScheme(appearance.colorScheme)
         .task {
             await viewModel.loadInitial()
@@ -202,7 +199,8 @@ struct ClipboardView: View {
                                     .frame(width: 60)
                             }
                         }
-                        .padding(10)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
                     }
                     .onChange(of: viewModel.selectionID) { _, newID in
                         guard let newID else { return }
@@ -404,44 +402,6 @@ struct SearchField: View {
         .onAppear { searchFocused = true }
         .onChange(of: viewModel.searchFocusRequest) {
             searchFocused = true
-        }
-    }
-}
-
-/// 底部快捷键提示条（需求 §20）：随默认操作设置变化。
-struct StatusFooter: View {
-    let defaultAction: DefaultPasteAction
-    let totalCount: Int
-
-    var body: some View {
-        HStack(spacing: 12) {
-            shortcut("↩", defaultAction == .activeApp ? "粘贴到当前应用" : "复制到剪贴板")
-            if defaultAction == .activeApp {
-                shortcut("⌘↩", "粘贴到当前应用")
-            } else {
-                shortcut("⌘↩", "粘贴到当前应用")
-            }
-            shortcut("⌘C", "复制到剪贴板")
-            shortcut("⌫", "删除")
-            shortcut("Esc", "关闭")
-            Spacer(minLength: 0)
-            Text("\(totalCount) 条记录")
-                .foregroundStyle(.tertiary)
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-    }
-
-    private func shortcut(_ key: String, _ action: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .font(.system(size: 10.5, weight: .semibold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1.5)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-            Text(action)
         }
     }
 }

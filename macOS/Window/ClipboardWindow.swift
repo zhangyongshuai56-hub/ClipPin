@@ -4,10 +4,8 @@ import SwiftUI
 /// 剪贴板主窗口（需求 §2/§3）：底部快速操作面板。
 /// 悬浮层级 + 全空间可见、隐藏标题栏、圆角毛玻璃、可拖拽调整尺寸（最小 700×300）。
 final class ClipboardWindow: NSPanel {
-    /// 最小内容尺寸（需求 §3）。
-    static let minContentSize = NSSize(width: 700, height: 300)
-    /// 默认内容尺寸（紧凑化：1000×300）。
-    static let defaultContentSize = NSSize(width: 1000, height: 300)
+    /// 默认内容尺寸（紧凑化：1000×280）。
+    static let defaultContentSize = NSSize(width: 1000, height: 280)
 
     init(rootView: ClipboardView, contentSize: NSSize) {
         super.init(
@@ -22,8 +20,8 @@ final class ClipboardWindow: NSPanel {
         for buttonType in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             standardWindowButton(buttonType)?.isHidden = true
         }
-        self.minSize = Self.minContentSize
-        // 上限由 WindowManager 在 windowWillResize 按当前屏幕可用区钳制
+        // 最小尺寸不限制（用户要求）；上限由 WindowManager 在 windowWillResize
+        // 按当前屏幕可用区钳制
         self.contentMaxSize = NSSize(width: 10_000, height: 10_000)
         self.isFloatingPanel = true
         self.level = .floating

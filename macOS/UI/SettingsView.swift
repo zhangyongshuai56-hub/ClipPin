@@ -1,3 +1,5 @@
+import AppKit
+import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
 
@@ -56,12 +58,6 @@ private struct GeneralSettingsView: View {
                     WindowManager.shared.applyAppearanceToAllWindows()
                 }
             }
-            Section("快捷键") {
-                LabeledContent("打开剪贴板", value: HotKeyCombo.defaultOpenClipboard.displayString)
-                Text("自定义全局快捷键将在后续版本提供。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
             Section("权限") {
                 LabeledContent("辅助功能（自动粘贴）", value: accessibilityTrusted ? "✓ 已授权" : "⚠️ 未授权")
                 if !accessibilityTrusted {
@@ -94,6 +90,11 @@ private struct GeneralSettingsView: View {
 /// 剪贴板设置（§49）：自动清理、历史上限、保存内容开关、单条大小上限。
 /// 全部写入 UserDefaults，监听与调度即时读取生效。
 private struct ClipboardSettingsView: View {
+    @State private var currentCombo: HotKeyCombo = .stored
+    @State private var isRecording = false
+    @State private var keyMonitor: Any?
+    @State private var recordingHint = "点击「更改」后按下新的组合键（Esc 取消）"
+    @State private var shortcutErrorMessage: String?
     @AppStorage(CleanupSettings.retentionKey) private var retentionRaw = RetentionPolicy.thirtyDays.rawValue
     @AppStorage(CleanupSettings.historyLimitKey) private var historyLimit = 1000
     @AppStorage(CaptureSettings.maxItemSizeKey) private var maxItemSize = 50 * 1024 * 1024
@@ -121,6 +122,44 @@ private struct ClipboardSettingsView: View {
 
     var body: some View {
         Form {
+            Section("全局快捷键") {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("呼出剪贴板").font(.system(size: 13))
+                        Text(recordingHint)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Text(isRecording ? "按下新组合键…" : currentCombo.displayString)
+                        .font(.system(size: 14, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .frame(minWidth: 110)
+                        .multilineTextAlignment(.center)
+                        .background(
+                            isRecording ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.07),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            if isRecording {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.accentColor, lineWidth: 1.5)
+                            }
+                        }
+                    Button(isRecording ? "取消" : "更改") {
+                        if isRecording {
+                            stopRecording()
+                        } else {
+                            startRecording()
+                        }
+                    }
+                    Button("恢复默认") {
+                        applyShortcut(.defaultOpenClipboard)
+                    }
+                }
+                .onAppear { currentCombo = .stored }
+            }
             Section("粘贴项目") {
                 Picker("默认操作", selection: $defaultActionRaw) {
                     Text(DefaultPasteAction.activeApp.title).tag(DefaultPasteAction.activeApp.rawValue)
@@ -260,5 +299,67 @@ private enum BundleInfo {
 
     static var build: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "—"
+    }
+}
+
+
+// MARK: - 全局快捷键录制（设置页）
+
+extension ClipboardSettingsView {
+    private func startRecording() {
+        guard keyMonitor == nil else { return }
+        isRecording = true
+        recordingHint = "按下新的组合键（需包含 ⌘ / ⌃ / ⌥，Esc 取消）"
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Esc 取消录制
+            if event.keyCode == 53 {
+                stopRecording()
+                return nil
+            }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            var carbon: UInt32 = 0
+            if mods.contains(.command) { carbon |= UInt32(cmdKey) }
+            if mods.contains(.shift) { carbon |= UInt32(shiftKey) }
+            if mods.contains(.option) { carbon |= UInt32(optionKey) }
+            if mods.contains(.control) { carbon |= UInt32(controlKey) }
+
+            // 安全要求：全局热键必须含 ⌘/⌃/⌥ 之一，避免裸字母键吞掉正常输入
+            guard carbon & UInt32(cmdKey | controlKey | optionKey) != 0 else {
+                recordingHint = "组合键需包含 ⌘ / ⌃ / ⌥ 之一，再试一次"
+                return nil
+            }
+
+            let combo = HotKeyCombo(keyCode: UInt32(event.keyCode), modifiers: carbon)
+            applyShortcut(combo)
+            stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        isRecording = false
+        recordingHint = "点击「更改」后按下新的组合键（Esc 取消）"
+    }
+
+    /// 应用新快捷键：注册成功才持久化；失败（冲突等）自动回滚原组合并提示。
+    private func applyShortcut(_ combo: HotKeyCombo) {
+        do {
+            try GlobalShortcutManager.shared.register(combo) {
+                WindowManager.shared.toggleClipboardWindow()
+            }
+            HotKeyCombo.save(combo)
+            currentCombo = combo
+            recordingHint = "点击「更改」后按下新的组合键（Esc 取消）"
+        } catch {
+            // 注册失败（如组合被占用）：恢复之前的组合
+            try? GlobalShortcutManager.shared.register(.stored) {
+                WindowManager.shared.toggleClipboardWindow()
+            }
+            shortcutErrorMessage = error.localizedDescription
+        }
     }
 }

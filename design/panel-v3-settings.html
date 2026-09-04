@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif; background: #1a1c20; }
+  .scene { width: 1400px; height: 560px; position: relative; overflow: hidden; }
+  .scene.light { background: linear-gradient(135deg, #dfe5ee 0%, #c9d4e4 40%, #e8e2d8 100%); }
+  .scene2 { background: #f2f3f5; position: relative; width: 1400px; height: 420px; }
+  .fake { position: absolute; border-radius: 8px; background: rgba(255,255,255,.86); box-shadow: 0 14px 40px rgba(30,40,60,.16); }
+  .fake .bar { height: 20px; border-radius: 8px 8px 0 0; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: rgba(0,0,0,.05); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .sk { border-radius: 4px; background: rgba(90,110,140,.15); }
+
+  .panel {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    width: 1000px; height: 264px; border-radius: 12px;
+    bottom: 22px;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 20px 50px rgba(10,15,30,.36), 0 3px 10px rgba(10,15,30,.2);
+    background: rgba(250,251,253,.82); border: 1px solid rgba(255,255,255,.6);
+    backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  }
+  /* 顶栏：高度 30，上下 padding 4 */
+  .topbar { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; flex: none;
+    border-bottom: 1px solid rgba(0,0,0,.07); }
+  .iconbtn { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center;
+    background: rgba(0,0,0,.05); }
+  .boards { display: flex; gap: 4px; margin-left: 2px; }
+  .chip { display: flex; align-items: center; gap: 5px; padding: 2.5px 8px; border-radius: 10px; font-size: 11.5px; color: #5a606b; }
+  .chip.active { font-weight: 600; background: rgba(20,90,220,.12); color: #1450c8; }
+  .bdot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* 卡片区：上下 padding 6，卡片更满 */
+  .shelf { flex: 1; display: flex; gap: 8px; padding: 6px 8px; align-items: stretch; overflow: hidden; }
+  .card { width: 150px; flex: none; border-radius: 8px; padding: 7px 8px;
+    display: flex; flex-direction: column; position: relative; height: 100%;
+    background: rgba(0,0,0,.045); }
+  .card.sel { border: 1.5px solid #2f6bff; background: rgba(47,107,255,.10); }
+  .card.sel::after { content: "↩"; position: absolute; top: 4px; right: 4px;
+    font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 7px; background: #2f6bff; color: #fff; }
+  .card .head { display: flex; align-items: center; gap: 4px; font-size: 9.5px; color: #7a828d; margin-bottom: 4px; }
+  .card .head .time { margin-left: auto; font-size: 9px; }
+  .card .body { flex: 1; font-size: 11px; line-height: 1.35; overflow: hidden; color: #23272e; }
+  .card .body .u { color: #1a63d6; font-weight: 500; }
+  .card .src { font-size: 9px; margin-top: 3px; text-align: right; color: #9aa2ac; }
+  .thumb { height: 40px; border-radius: 5px; background: linear-gradient(135deg, #7fb2ff 0%, #b58cff 55%, #ff9ab0 100%); }
+
+  .note { position: absolute; font-size: 11.5px; color: #1450c8; background: rgba(255,255,255,.88);
+    padding: 3px 8px; border-radius: 6px; border: 1px dashed #1450c8; z-index: 5; }
+  .caption { position: absolute; left: 50%; transform: translateX(-50%); bottom: 5px;
+    font-size: 12px; color: #7d8794; }
+
+  /* 设置页 mock */
+  .settings { position: absolute; left: 50%; transform: translateX(-50%); top: 30px;
+    width: 520px; border-radius: 10px; background: #fff;
+    box-shadow: 0 16px 50px rgba(20,30,50,.18); padding: 18px 20px; }
+  .settings h3 { font-size: 14px; margin-bottom: 14px; color: #1d2129; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px;
+    background: #f6f7f9; margin-bottom: 10px; }
+  .recorder { min-width: 120px; text-align: center; padding: 8px 14px; border-radius: 8px;
+    border: 1.5px solid #2f6bff; background: #fff; font-size: 15px; font-weight: 600; color: #1d2129;
+    box-shadow: 0 0 0 3px rgba(47,107,255,.15); }
+  .recorder.hint { font-size: 10px; color: #8b93a0; font-weight: 400; margin-top: 3px; }
+  .btn { padding: 5px 12px; border-radius: 6px; background: #fff; border: 1px solid #d5d9df;
+    font-size: 12px; color: #1d2129; }
+  .label { font-size: 13px; color: #1d2129; }
+  .sub { font-size: 11px; color: #8b93a0; margin-top: 2px; }
+  .radio { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #2f6bff; position: relative; flex: none; }
+  .radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #2f6bff; }
+  .radio.off { border-color: #c5cad2; }
+  .radio.off::after { display: none; }
+</style>
+</head>
+<body>
+
+<!-- 场景1：面板（无提示条 + 极紧凑） -->
+<div class="scene light">
+  <div class="fake" style="left:50px; top:36px; width:400px; height:250px;">
+    <div class="bar"><div class="dot" style="background:#ff5f57"></div><div class="dot" style="background:#febc2e"></div><div class="dot" style="background:#28c840"></div></div>
+    <div style="padding:12px; display:grid; gap:8px;">
+      <div class="sk" style="width:60%; height:11px"></div>
+      <div class="sk" style="width:82%; height:11px"></div>
+      <div class="sk" style="width:50%; height:11px"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="topbar">
+      <div class="iconbtn"><svg width="12" height="12" viewBox="0 0 16 16"><circle cx="6.8" cy="6.8" r="5" fill="none" stroke="#8b939e" stroke-width="1.6"/><path d="M10.5 10.5 L14.2 14.2" stroke="#8b939e" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <div class="boards">
+        <div class="chip active"><div class="bdot" style="background:#1450c8"></div>剪贴板</div>
+        <div class="chip"><div class="bdot" style="background:#e8a013"></div>工作资料</div>
+      </div>
+      <div class="iconbtn" style="margin-left:auto"><svg width="11" height="11" viewBox="0 0 24 24" fill="#8b939e"><path d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg></div>
+    </div>
+    <div class="shelf">
+      <div class="card sel">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本<span class="time">now</span></div>
+        <div class="body">全局快捷键需支持自定义，可以按下新的组合键完成录制…</div>
+        <div class="src">ZCode</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3zm3 10l4-5 3 4 3-3 5 6H6z"/></svg>图片<span class="time">3分钟</span></div>
+        <div class="thumb"></div>
+        <div class="src">PixPin</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5z"/></svg>文件<span class="time">18分钟</span></div>
+        <div class="body"><b style="font-size:11px">report.xlsx</b><br><span style="opacity:.65; font-size:10px">486 KB</span></div>
+        <div class="src">Finder</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg>链接<span class="time">32分钟</span></div>
+        <div class="body mono" style="font-family:'SF Mono',Menlo,monospace; font-size:10px"><span class="u" style="color:#1a63d6; font-weight:500">github.com</span></div>
+        <div class="src">Safari</div>
+      </div>
+      <div class="card">
+        <div class="head"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v20H6zm2 3v2h8V5z"/></svg>文本<span class="time">1小时</span></div>
+        <div class="body">会议纪要要点：确认排期、物料清单、接口联调…</div>
+        <div class="src">Notes</div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="right:30px; top:6px;">删除底部提示条 · 顶栏 30pt · 卡片区上下 padding 6</div>
+  <div class="caption">面板默认 1000×280 · 无底部提示条（快捷键见设置页）· 卡片高度撑满</div>
+</div>
+
+<!-- 场景2：设置页（快捷键自定义 + 粘贴项目） -->
+<div class="scene2">
+  <div class="settings">
+    <h3>剪贴板</h3>
+    <div class="row">
+      <div style="flex:1">
+        <div class="label">全局快捷键</div>
+        <div class="sub">点击「更改」后按下新的组合键（Esc 取消）</div>
+      </div>
+      <div class="recorder">⌘ ⇧ V<div class="hint">点击更改</div></div>
+      <button class="btn">更改</button>
+      <button class="btn">恢复默认</button>
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:1">
+        <div style="display:flex; align-items:center; gap:8px"><div class="radio"></div><div class="label" style="font-weight:600">到当前活动应用</div></div>
+        <div class="sub" style="margin:3px 0 0 23px">将选定的项目直接粘贴到您当前正在使用的应用程序中。</div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:10px"><div class="radio off"></div><div class="label">到剪贴板</div></div>
+        <div class="sub" style="margin:3px 0 0 23px">将选定的项目复制到系统剪贴板，以便稍后手动粘贴。</div>
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:0">
+      <div class="label" style="flex:1">始终以纯文本粘贴</div>
+      <div style="width:34px; height:20px; border-radius:10px; background:#c5cad2; position:relative">
+        <div style="width:16px; height:16px; border-radius:50%; background:#fff; position:absolute; top:2px; left:2px; box-shadow:0 1px 3px rgba(0,0,0,.25)"></div>
+      </div>
+    </div>
+  </div>
+  <div class="note" style="left:50%; transform:translateX(-50%); top:6px; width:max-content">设置页新增：全局快捷键自定义（录制式，冲突检测 + 恢复默认）</div>
+  <div class="caption" style="color:#8b93a0">设置 → 剪贴板 顶部新增「全局快捷键」行</div>
+</div>
+
+</body>
+</html>

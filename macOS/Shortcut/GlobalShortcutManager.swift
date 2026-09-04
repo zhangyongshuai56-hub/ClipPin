@@ -13,6 +13,28 @@ struct HotKeyCombo: Equatable, Sendable {
         modifiers: UInt32(cmdKey | shiftKey)
     )
 
+    /// 从 UserDefaults 读取用户自定义组合；未设置时返回默认 ⌘⇧V。
+    static var stored: HotKeyCombo {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: "hotKeyCode") != nil,
+              let code = (defaults.object(forKey: "hotKeyCode") as? NSNumber)?.intValue,
+              let mods = (defaults.object(forKey: "hotKeyModifiers") as? NSNumber)?.intValue
+        else {
+            return .defaultOpenClipboard
+        }
+        return HotKeyCombo(keyCode: UInt32(code), modifiers: UInt32(mods))
+    }
+
+    static func save(_ combo: HotKeyCombo) {
+        UserDefaults.standard.set(Int(combo.keyCode), forKey: "hotKeyCode")
+        UserDefaults.standard.set(Int(combo.modifiers), forKey: "hotKeyModifiers")
+    }
+
+    static func resetToDefault() {
+        UserDefaults.standard.removeObject(forKey: "hotKeyCode")
+        UserDefaults.standard.removeObject(forKey: "hotKeyModifiers")
+    }
+
     /// 设置页展示用（§49）。
     var displayString: String {
         var text = ""

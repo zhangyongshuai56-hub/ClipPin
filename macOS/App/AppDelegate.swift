@@ -29,10 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 注册全局快捷键（§26，默认 ⌘⇧V）。失败可见：记录日志，设置页将展示错误（Phase 11）。
+    /// 注册全局快捷键（§26；用户自定义组合，默认 ⌘⇧V）。
     private func registerGlobalShortcut() {
         do {
-            try globalShortcutManager.register(.defaultOpenClipboard) {
+            try globalShortcutManager.register(.stored) {
                 WindowManager.shared.toggleClipboardWindow()
             }
         } catch {
