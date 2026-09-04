@@ -23,8 +23,10 @@ struct ClipboardCard: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            // 内容在头部行与来源行之间垂直 + 水平居中：窗口拉伸时上下 Spacer 均分剩余空间
+            Spacer(minLength: 0)
             bodyContent
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             Spacer(minLength: 0)
             HStack(spacing: 4) {
                 Spacer(minLength: 0)
