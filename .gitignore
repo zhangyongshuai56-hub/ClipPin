@@ -6,3 +6,5 @@ xcuserdata/
 *.xcuserstate
 *.xcresult
 rust-core/target/
+.mimosa/
+dist/
