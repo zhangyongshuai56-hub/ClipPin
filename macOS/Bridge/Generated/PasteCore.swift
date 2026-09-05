@@ -1185,10 +1185,24 @@ public struct ClipboardItem: Equatable, Hashable {
     public var contentHash: String
     public var isPinned: Bool
     public var metadata: String?
+    /**
+     * 已从「剪贴板」历史软删除；收藏条目保留在文件夹中（v4）。
+     */
+    public var removedFromHistory: Bool
+    /**
+     * 标题由用户命名，内容编辑 / 重新捕获时不覆盖（v4）。
+     */
+    public var titleIsCustom: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: Int64, itemType: ItemType, createdAt: Int64, updatedAt: Int64, title: String?, preview: String?, textContent: String?, url: String?, filePath: String?, imagePath: String?, thumbnailPath: String?, sourceApp: String?, sourceAppName: String?, contentSize: Int64, uti: String?, contentHash: String, isPinned: Bool, metadata: String?) {
+    public init(id: Int64, itemType: ItemType, createdAt: Int64, updatedAt: Int64, title: String?, preview: String?, textContent: String?, url: String?, filePath: String?, imagePath: String?, thumbnailPath: String?, sourceApp: String?, sourceAppName: String?, contentSize: Int64, uti: String?, contentHash: String, isPinned: Bool, metadata: String?, 
+        /**
+         * 已从「剪贴板」历史软删除；收藏条目保留在文件夹中（v4）。
+         */removedFromHistory: Bool, 
+        /**
+         * 标题由用户命名，内容编辑 / 重新捕获时不覆盖（v4）。
+         */titleIsCustom: Bool) {
         self.id = id
         self.itemType = itemType
         self.createdAt = createdAt
@@ -1207,6 +1221,8 @@ public struct ClipboardItem: Equatable, Hashable {
         self.contentHash = contentHash
         self.isPinned = isPinned
         self.metadata = metadata
+        self.removedFromHistory = removedFromHistory
+        self.titleIsCustom = titleIsCustom
     }
 
     
@@ -1242,7 +1258,9 @@ public struct FfiConverterTypeClipboardItem: FfiConverterRustBuffer {
                 uti: FfiConverterOptionString.read(from: &buf), 
                 contentHash: FfiConverterString.read(from: &buf), 
                 isPinned: FfiConverterBool.read(from: &buf), 
-                metadata: FfiConverterOptionString.read(from: &buf)
+                metadata: FfiConverterOptionString.read(from: &buf), 
+                removedFromHistory: FfiConverterBool.read(from: &buf), 
+                titleIsCustom: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -1265,6 +1283,8 @@ public struct FfiConverterTypeClipboardItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.contentHash, into: &buf)
         FfiConverterBool.write(value.isPinned, into: &buf)
         FfiConverterOptionString.write(value.metadata, into: &buf)
+        FfiConverterBool.write(value.removedFromHistory, into: &buf)
+        FfiConverterBool.write(value.titleIsCustom, into: &buf)
     }
 }
 

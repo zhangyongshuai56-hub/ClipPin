@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     var body: some View {
@@ -10,12 +11,118 @@ struct SettingsView: View {
                 .tabItem { Label("通用", systemImage: "gearshape") }
             ClipboardSettingsView()
                 .tabItem { Label("剪贴板", systemImage: "doc.on.clipboard") }
+            DataSettingsView()
+                .tabItem { Label("数据", systemImage: "externaldrive") }
             PrivacySettingsView()
                 .tabItem { Label("隐私", systemImage: "hand.raised") }
             AboutSettingsView()
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
         .frame(width: 500, height: 430)
+    }
+}
+
+/// 数据（导入 / 导出）：文件夹与记录迁移到另一台电脑。
+private struct DataSettingsView: View {
+    @State private var isBusy = false
+    @State private var resultMessage: String?
+    @State private var failureMessage: String?
+
+    var body: some View {
+        Form {
+            Section("导出") {
+                Text("把全部文件夹及其中的剪贴板记录导出为一个 .pasteexport 文件（图片一并打包），拷贝到另一台电脑的 Paste 中导入即可。文件与文件夹类记录只保存引用，不打包文件本体。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("导出全部文件夹…") { chooseExportDestination() }
+            }
+            Section("导入") {
+                Text("从 .pasteexport 文件导入：同名文件夹合并，重复内容自动去重合并，命名标题与置顶状态保留，文件类记录自动跳过并计数。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("从文件导入…") { chooseImportFile() }
+            }
+        }
+        .formStyle(.grouped)
+        .disabled(isBusy)
+        .overlay {
+            if isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在处理…").font(.footnote)
+                }
+            }
+        }
+        .alert(
+            "导入 / 导出完成",
+            isPresented: Binding(
+                get: { resultMessage != nil },
+                set: { if !$0 { resultMessage = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(resultMessage ?? "")
+        }
+        .alert(
+            "操作失败",
+            isPresented: Binding(
+                get: { failureMessage != nil },
+                set: { if !$0 { failureMessage = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(failureMessage ?? "")
+        }
+    }
+
+    private func chooseExportDestination() {
+        guard let repository = CoreStore.shared.repository else {
+            failureMessage = LibraryTransferError.coreUnavailable.localizedDescription
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pasteExport]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        panel.nameFieldStringValue = "Paste-导出-\(formatter.string(from: Date()))"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        isBusy = true
+        Task {
+            defer { isBusy = false }
+            do {
+                resultMessage = try await LibraryTransfer
+                    .exportAll(to: url, repository: repository)
+                    .message
+            } catch {
+                failureMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func chooseImportFile() {
+        guard let repository = CoreStore.shared.repository else {
+            failureMessage = LibraryTransferError.coreUnavailable.localizedDescription
+            return
+        }
+        let panel = NSOpenPanel()
+        // 动态注册的 UTType 在部分系统版本上过滤不生效，放宽到 json 并在解析时严格校验
+        panel.allowedContentTypes = [.pasteExport, .json]
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        isBusy = true
+        Task {
+            defer { isBusy = false }
+            do {
+                resultMessage = try await LibraryTransfer
+                    .importDocument(from: url, repository: repository)
+                    .message
+            } catch {
+                failureMessage = (error as? LibraryTransferError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        }
     }
 }
 

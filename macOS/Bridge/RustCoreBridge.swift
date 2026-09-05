@@ -93,6 +93,10 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
     let isPinned: Bool
     /// metadata 原始 JSON；派生信息（如代码语言）按需解析。
     let metadata: String?
+    /// 已从「剪贴板」历史软删除；收藏条目保留在文件夹中。
+    let removedFromHistory: Bool
+    /// 标题由用户命名，内容变更不覆盖。
+    let titleIsCustom: Bool
 
     /// 分类器检测到的代码语言（仅 code 类型可能有）。
     var codeLanguage: String? {
@@ -123,6 +127,8 @@ extension ClipboardEntry {
         uti = item.uti
         isPinned = item.isPinned
         metadata = item.metadata
+        removedFromHistory = item.removedFromHistory
+        titleIsCustom = item.titleIsCustom
     }
 
     /// 以既有内容再次构造输入：提交给 Core 后经 content_hash 去重只刷新最近使用时间（§17）。

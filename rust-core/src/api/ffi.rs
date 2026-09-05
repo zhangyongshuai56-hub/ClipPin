@@ -103,6 +103,10 @@ pub struct ClipboardItem {
     pub content_hash: String,
     pub is_pinned: bool,
     pub metadata: Option<String>,
+    /// 已从「剪贴板」历史软删除；收藏条目保留在文件夹中（v4）。
+    pub removed_from_history: bool,
+    /// 标题由用户命名，内容编辑 / 重新捕获时不覆盖（v4）。
+    pub title_is_custom: bool,
 }
 
 impl From<CoreClipboardItem> for ClipboardItem {
@@ -126,6 +130,8 @@ impl From<CoreClipboardItem> for ClipboardItem {
             content_hash: item.content_hash,
             is_pinned: item.is_pinned,
             metadata: item.metadata,
+            removed_from_history: item.removed_from_history,
+            title_is_custom: item.title_is_custom,
         }
     }
 }
