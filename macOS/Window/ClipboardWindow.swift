@@ -10,7 +10,9 @@ final class ClipboardWindow: NSPanel {
     init(rootView: ClipboardView, contentSize: NSSize) {
         super.init(
             contentRect: NSRect(origin: .zero, size: contentSize),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            // .nonactivatingPanel：不激活应用也能成为 key window（Spotlight 模型）。
+            // 前台应用正在输入时协作式激活会被系统拒绝，键盘焦点不能依赖应用激活。
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -40,8 +42,9 @@ final class ClipboardWindow: NSPanel {
         let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: contentSize))
         effect.material = .underWindowBackground
         effect.blendingMode = .behindWindow
-        // followsWindowActiveState：非激活时降低模糊重绘成本（resize 卡顿优化）
-        effect.state = .followsWindowActiveState
+        // 固定 active：面板常以非激活 key 状态使用（热键呼出），
+        // followsWindowActiveState 会让材质在这种状态下变淡
+        effect.state = .active
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 16
         effect.layer?.masksToBounds = true

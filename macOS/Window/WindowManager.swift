@@ -20,6 +20,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
     /// 面板是否真正获得过键盘焦点（激活失败时不启用「点击外部关闭」）。
     private var panelHadKeyFocus = false
     private var resignObserver: NSObjectProtocol?
+    /// 面板可见期间的全局点击监听（非激活面板不会产生 resignActive，点击外部关闭由此兜底）。
+    private var clickOutsideObserver: Any?
 
     /// 显示剪贴板面板（需求 §1、§7）：出现在鼠标所在屏幕底部居中，聚焦搜索框。
     func showClipboardWindow(focusSearch: Bool = true) {
@@ -38,18 +40,21 @@ final class WindowManager: NSObject, NSWindowDelegate {
         panelHadKeyFocus = false
         // §64：呼出淡入（100~250ms 内）
         window.alphaValue = 0
+        // .nonactivatingPanel：makeKey 不依赖应用激活——前台应用正在输入、
+        // 协作式激活被系统拒绝时，面板照样拿到键盘焦点（Spotlight 模型）
         window.makeKeyAndOrderFront(nil)
+        window.makeKey()
+        // best-effort 激活：成功时失活关闭等旧行为保持；失败不影响面板可用
         NSApp.activate(ignoringOtherApps: true)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
-        // 激活重试：macOS 可能拒绝后台激活或焦点被前一个应用抢回，
-        // 短间隔重试两次，修复「按两次才呼出」
+        // makeKey 可能被系统延迟（协作式激活期间），重试直至面板真正拿到 key
         for delay in [0.1, 0.35] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                if !(window.isKeyWindow && NSApp.isActive) {
+                if !window.isKeyWindow {
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
                     window.makeKey()
@@ -62,22 +67,22 @@ final class WindowManager: NSObject, NSWindowDelegate {
         if focusSearch, let viewModel {
             viewModel.requestSearchFocus()
         }
+        installClickOutsideObserverIfNeeded()
         installResignObserverIfNeeded()
     }
 
     /// 全局快捷键行为（§26）：未显示 → 呼出并聚焦搜索；有焦点 → 隐藏；
-    /// 可见但无焦点（被其他应用抢回焦点）→ 重新激活而不是误隐藏。
+    /// 可见但无 key（系统延迟 makeKey）→ 重新 makeKey 而不是误隐藏。
     func toggleClipboardWindow() {
         if let window = clipboardWindow, window.isVisible {
-            if window.isKeyWindow && NSApp.isActive {
+            if window.isKeyWindow {
                 logger.info("toggle: visible+key → hide")
                 hideClipboardWindow()
             } else {
-                logger.info("toggle: visible without key → re-activate")
-                NSApp.activate(ignoringOtherApps: true)
+                logger.info("toggle: visible without key → make key")
                 window.makeKeyAndOrderFront(nil)
                 window.makeKey()
-                panelHadKeyFocus = window.isKeyWindow
+                panelHadKeyFocus = panelHadKeyFocus || window.isKeyWindow
             }
         } else {
             showClipboardWindow()
@@ -139,7 +144,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         }
     }
 
-    /// 需求 §6：点击窗口外部关闭。1.5s 宽限期防误关（呼出后焦点可能被短暂抢回）；粘贴进行中不关闭。
+    /// 需求 §6：点击窗口外部关闭（应用激活成功时的路径）。
+    /// 1.5s 宽限期防误关（呼出后焦点可能被短暂抢回）；粘贴进行中不关闭。
     private func installResignObserverIfNeeded() {
         guard resignObserver == nil else { return }
         resignObserver = NotificationCenter.default.addObserver(
@@ -155,6 +161,24 @@ final class WindowManager: NSObject, NSWindowDelegate {
                 guard !PasteService.shared.isBusy else { return }
                 // 呼出时未获得焦点（如系统拒绝后台激活）→ 失活不关，面板仍可点击使用
                 guard self.panelHadKeyFocus else { return }
+                self.hideClipboardWindow()
+            }
+        }
+    }
+
+    /// 「点击外部关闭」兜底：非激活面板（热键呼出且协作式激活被拒）不会产生
+    /// resignActive 事件，全局鼠标监听负责在点击面板外时关闭。
+    /// 全局监听只收到应用外部的点击，无需再判断点击位置；
+    /// 宽限期与 Quick Paste 守卫与失活路径一致，两条路径幂等。
+    private func installClickOutsideObserverIfNeeded() {
+        guard clickOutsideObserver == nil else { return }
+        clickOutsideObserver = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.clipboardWindow, window.isVisible else { return }
+                guard Date().timeIntervalSince(self.shownAt) > 1.5 else { return }
+                guard !PasteService.shared.isBusy else { return }
                 self.hideClipboardWindow()
             }
         }
