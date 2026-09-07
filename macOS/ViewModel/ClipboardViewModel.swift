@@ -68,6 +68,7 @@ final class ClipboardViewModel {
 
     private var searchTask: Task<Void, Never>?
     private var monitorCancellable: AnyCancellable?
+    private var cleanupCancellable: AnyCancellable?
     /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
 
@@ -89,6 +90,13 @@ final class ClipboardViewModel {
         monitorCancellable = NotificationCenter.default
             .publisher(for: .clipboardMonitorDidSaveItem)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Task { await self?.refresh() }
+            }
+        // 自动清理删除数据后刷新列表（此前清理结果不反映在面板上）
+        cleanupCancellable = NotificationCenter.default
+            .publisher(for: .cleanupSchedulerDidCleanup)
+            .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }

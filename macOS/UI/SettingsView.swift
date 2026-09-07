@@ -204,6 +204,10 @@ private struct ClipboardSettingsView: View {
     @State private var shortcutErrorMessage: String?
     @AppStorage(CleanupSettings.retentionKey) private var retentionRaw = RetentionPolicy.thirtyDays.rawValue
     @AppStorage(CleanupSettings.historyLimitKey) private var historyLimit = 1000
+    @AppStorage(CleanupSettings.intervalValueKey) private var intervalValue = 1
+    @AppStorage(CleanupSettings.intervalUnitKey) private var intervalUnitRaw = CleanupSettings.IntervalUnit.hours.rawValue
+    @State private var cleanupInProgress = false
+    @State private var cleanupSummary: String?
     @AppStorage(CaptureSettings.maxItemSizeKey) private var maxItemSize = 50 * 1024 * 1024
     @AppStorage(CaptureSettings.saveImagesKey) private var saveImages = true
     @AppStorage(CaptureSettings.saveFilesKey) private var saveFiles = true
@@ -289,7 +293,27 @@ private struct ClipboardSettingsView: View {
                         Text(title).tag(limit)
                     }
                 }
-                Text("超出上限时从最旧的非置顶记录开始清理；置顶记录永不自动清理。")
+                HStack {
+                    Text("清理频率")
+                    Spacer()
+                    TextField("间隔", value: $intervalValue, format: .number.grouping(.never))
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 56)
+                        .textFieldStyle(.roundedBorder)
+                    Picker(
+                        "单位",
+                        selection: $intervalUnitRaw
+                    ) {
+                        ForEach(CleanupSettings.IntervalUnit.allCases, id: \.self) { unit in
+                            Text(unit.title).tag(unit.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 82)
+                }
+                Button("立即清理") { runCleanupNow() }
+                    .disabled(cleanupInProgress)
+                Text("置顶与已收藏到文件夹的记录永不自动清理、不计入上限；保留时长按记录的最近使用时间计算，频率决定检查间隔。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -316,6 +340,34 @@ private struct ClipboardSettingsView: View {
         }
         .onChange(of: historyLimit) {
             Task { await CleanupScheduler.shared.runOnce() }
+        }
+        .onChange(of: intervalValue) {
+            CleanupScheduler.shared.restartSchedule()
+        }
+        .onChange(of: intervalUnitRaw) {
+            // 换单位后把数值钳制到新单位的合法范围
+            intervalValue = min(max(intervalValue, 1), CleanupSettings.intervalUnit.maxValue)
+            CleanupScheduler.shared.restartSchedule()
+        }
+        .alert(
+            "自动清理",
+            isPresented: Binding(
+                get: { cleanupSummary != nil },
+                set: { if !$0 { cleanupSummary = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(cleanupSummary ?? "")
+        }
+    }
+
+    private func runCleanupNow() {
+        cleanupInProgress = true
+        Task {
+            let summary = await CleanupScheduler.shared.runOnce()
+            cleanupInProgress = false
+            cleanupSummary = summary.message
         }
     }
 }
