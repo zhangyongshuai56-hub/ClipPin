@@ -83,10 +83,11 @@ private struct DataSettingsView: View {
             return
         }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pasteExport]
+        // 运行时注册的自定义 UTType 没有扩展名映射，SavePanel 不会自动补后缀：
+        // 直接在默认文件名里带 .pasteexport（导入面板不过滤类型，由解析层校验）
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
-        panel.nameFieldStringValue = "Paste-导出-\(formatter.string(from: Date()))"
+        panel.nameFieldStringValue = "Paste-导出-\(formatter.string(from: Date())).pasteexport"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         isBusy = true
         Task {
@@ -107,8 +108,11 @@ private struct DataSettingsView: View {
             return
         }
         let panel = NSOpenPanel()
-        // 动态注册的 UTType 在部分系统版本上过滤不生效，放宽到 json 并在解析时严格校验
-        panel.allowedContentTypes = [.pasteExport, .json]
+        // 不按 UTI 过滤：运行时注册的自定义类型对文件面板的扩展名匹配不可靠，
+        // 会把 .pasteexport（乃至无扩展名的旧导出文件）挡成灰色不可选。
+        // 放开显示、由解析层严格校验（invalidDocument）。
+        panel.message = "选择 Paste 导出的备份文件（.pasteexport）"
+        panel.canChooseFiles = true
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         isBusy = true

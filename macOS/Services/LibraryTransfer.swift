@@ -1,12 +1,4 @@
 import Foundation
-import UniformTypeIdentifiers
-
-/// `.pasteexport` 文件类型（导出保存面板与导入打开面板共用）。
-extension UTType {
-    static var pasteExport: UTType {
-        UTType(exportedAs: "com.paste.app.export")
-    }
-}
 
 // MARK: - 导出文档模型（v1）
 
