@@ -95,6 +95,11 @@ actor ClipboardRepository {
         try database.renameItem(id: id, title: title)
     }
 
+    /// 设置「从历史移除」软删除标记（导入备份时还原状态用）。
+    func setRemovedFromHistory(id: Int64, removed: Bool) throws {
+        try database.setItemRemovedFromHistory(id: id, removed: removed)
+    }
+
     func delete(ids: [Int64]) throws -> Int {
         Int(try database.deleteItems(ids: ids))
     }

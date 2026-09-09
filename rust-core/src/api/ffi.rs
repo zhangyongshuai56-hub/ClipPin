@@ -444,6 +444,11 @@ impl PasteDatabase {
         Ok(self.db.remove_item_from_history(id)?.into())
     }
 
+    /// 设置条目的「从历史移除」标记（导入备份时还原软删除状态）。
+    pub fn set_item_removed_from_history(&self, id: i64, removed: bool) -> Result<(), PasteError> {
+        Ok(self.db.set_removed_from_history(id, removed)?)
+    }
+
     /// 编辑文本条目（重分类、重算哈希；与已有记录重复时自动合并）。
     pub fn edit_text_item(&self, id: i64, new_text: String) -> Result<EditOutcome, PasteError> {
         Ok(self.db.edit_text_item(id, &new_text)?.into())

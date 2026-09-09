@@ -28,6 +28,8 @@ struct ExportItem: Codable {
     /// 捕获时间（毫秒），导入时保留原值。
     var createdAt: Int64
     var metadata: String?
+    /// 「从历史移除」软删除标记（收藏保留语义）；旧版本导出文件无此字段视为 false。
+    var removedFromHistory: Bool?
     /// 图片载荷（仅图片记录携带）。
     var image: ExportImage?
 }
@@ -101,8 +103,6 @@ enum LibraryTransferError: LocalizedError {
 /// 导入复用仓储 API：create（自动去重）→ rename（命名标记）→ setItemBoard → pin。
 enum LibraryTransfer {
     static let formatIdentifier = "paste-export"
-    /// 单文件夹导出的读取上限（收藏文件夹规模远小于全部历史）。
-    private static let maxItemsPerBoard = 10_000
 
     // MARK: - 导出
 
@@ -112,7 +112,16 @@ enum LibraryTransfer {
         var totalItems = 0
         var skippedBroken = 0
         for board in boards {
-            let items = try await repository.items(boardId: board.id, limit: maxItemsPerBoard)
+            // 分页读取：Core 单次查询有 1000 条硬上限，不分页会静默截断大文件夹
+            var items: [ClipboardEntry] = []
+            let pageSize = 500
+            var offset = 0
+            while true {
+                let page = try await repository.items(boardId: board.id, limit: pageSize, offset: offset)
+                items.append(contentsOf: page)
+                if page.count < pageSize { break }
+                offset += pageSize
+            }
             var exportItems: [ExportItem] = []
             for entry in items {
                 if let item = exportItem(from: entry) {
@@ -167,6 +176,7 @@ enum LibraryTransfer {
             isPinned: entry.isPinned,
             createdAt: Int64(entry.createdAt.timeIntervalSince1970 * 1000),
             metadata: entry.metadata,
+            removedFromHistory: entry.removedFromHistory,
             image: image
         )
     }
@@ -286,6 +296,10 @@ enum LibraryTransfer {
         try await repository.setItemBoard(id: created.id, boardId: boardID)
         if item.isPinned {
             try await repository.pin(id: created.id)
+        }
+        // 还原「从历史移除」状态：该记录只出现在文件夹里，不重新回到历史列表
+        if item.removedFromHistory == true {
+            try await repository.setRemovedFromHistory(id: created.id, removed: true)
         }
         // create 对已存在内容只 touch（保留其原 created_at）；
         // 返回的 created_at 与导出值不一致 ⇒ 命中了已有记录（合并）

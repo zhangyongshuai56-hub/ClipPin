@@ -673,6 +673,11 @@ public protocol PasteDatabaseProtocol: AnyObject, Sendable {
     func setItemBoard(id: Int64, boardId: Int64?) throws 
     
     /**
+     * 设置条目的「从历史移除」标记（导入备份时还原软删除状态）。
+     */
+    func setItemRemovedFromHistory(id: Int64, removed: Bool) throws 
+    
+    /**
      * 清扫孤儿图片文件（§48），返回删除数。
      */
     func sweepOrphanArtifacts() throws  -> Int64
@@ -1022,6 +1027,19 @@ open func setItemBoard(id: Int64, boardId: Int64?)throws   {try rustCallWithErro
             self.uniffiCloneHandle(),
         FfiConverterInt64.lower(id),
         FfiConverterOptionInt64.lower(boardId),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * 设置条目的「从历史移除」标记（导入备份时还原软删除状态）。
+     */
+open func setItemRemovedFromHistory(id: Int64, removed: Bool)throws   {try rustCallWithError(FfiConverterTypePasteError_lift) {
+        uniffiCallStatus in
+    uniffi_paste_core_fn_method_pastedatabase_set_item_removed_from_history(
+            self.uniffiCloneHandle(),
+        FfiConverterInt64.lower(id),
+        FfiConverterBool.lower(removed),uniffiCallStatus
     )
 }
 }
@@ -2260,6 +2278,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paste_core_checksum_method_pastedatabase_set_item_board() != 32248) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_paste_core_checksum_method_pastedatabase_set_item_removed_from_history() != 36772) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_paste_core_checksum_method_pastedatabase_sweep_orphan_artifacts() != 53936) {

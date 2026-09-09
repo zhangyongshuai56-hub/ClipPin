@@ -415,6 +415,20 @@ impl Database {
         Ok(RemovalOutcome::Deleted)
     }
 
+    /// 设置条目的「从历史移除」标记（导入备份时还原软删除状态）。
+    /// 仅改标记：条目应已收藏（软删除语义要求收藏保留），由调用方保证顺序。
+    pub fn set_removed_from_history(&self, id: i64, removed: bool) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let affected = conn.execute(
+            "UPDATE clipboard_items SET removed_from_history = ?2 WHERE id = ?1",
+            params![id, removed],
+        )?;
+        if affected == 0 {
+            return Err(PasteError::NotFound(id));
+        }
+        Ok(())
+    }
+
     /// 编辑文本条目内容（需求：编辑记录；仅文本类可编辑）。
     /// 重跑分类（编辑可能改变性质：普通文本 ↔ URL ↔ 代码）并重算内容指纹；
     /// 命名过的标题保留，未命名的重新派生。
@@ -1144,6 +1158,24 @@ mod tests {
             RemovalOutcome::Deleted
         );
         assert!(db.get_item(item.id).is_err());
+    }
+
+    #[test]
+    fn set_removed_flag_restores_soft_delete_state() {
+        let db = Database::open_in_memory().unwrap();
+        let item = db.create_item(text_item("备份恢复的条目")).unwrap();
+        let board = db.create_board("工作", "#4F8EF7").unwrap();
+        db.set_item_board(item.id, Some(board.id)).unwrap();
+
+        // 模拟导入还原：标记后默认视图不可见，文件夹内可见
+        db.set_removed_from_history(item.id, true).unwrap();
+        assert!(db.get_items(None, None, 50, 0).unwrap().is_empty());
+        assert_eq!(db.get_items(None, Some(board.id), 50, 0).unwrap().len(), 1);
+
+        // 清除标记后回到历史
+        db.set_removed_from_history(item.id, false).unwrap();
+        assert_eq!(db.get_items(None, None, 50, 0).unwrap().len(), 1);
+        assert!(db.set_removed_from_history(999, true).is_err());
     }
 
     #[test]
