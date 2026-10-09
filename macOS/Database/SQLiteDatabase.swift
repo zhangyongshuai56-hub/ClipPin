@@ -33,14 +33,16 @@ struct SQLRow {
         columnIndex = index
     }
 
-    private func assert(_ name: String) -> Int32 {
+    /// 列缺失一律抛错（schema 漂移 / 列名笔误不该崩溃进程）；
+    /// 调用方 map 闭包本身是 throws，错误沿查询路径上抛为 PasteError.database。
+    private func assert(_ name: String) throws -> Int32 {
         guard let i = columnIndex[name] else {
-            fatalError("SQL row column not found: \(name)")
+            throw PasteError.database("SQL row column not found: \(name)")
         }
         return i
     }
 
-    func int(_ name: String) -> Int64 { sqlite3_column_int64(handle, assert(name)) }
+    func int(_ name: String) throws -> Int64 { sqlite3_column_int64(handle, try assert(name)) }
 
     func int(_ index: Int) -> Int64 { sqlite3_column_int64(handle, Int32(index)) }
 
@@ -49,20 +51,20 @@ struct SQLRow {
         return String(cString: cString)
     }
 
-    func intOrNil(_ name: String) -> Int64? {
-        sqlite3_column_type(handle, assert(name)) == SQLITE_NULL ? nil : int(name)
+    func intOrNil(_ name: String) throws -> Int64? {
+        sqlite3_column_type(handle, try assert(name)) == SQLITE_NULL ? nil : try int(name)
     }
 
-    func string(_ name: String) -> String {
-        guard let cString = sqlite3_column_text(handle, assert(name)) else { return "" }
+    func string(_ name: String) throws -> String {
+        guard let cString = sqlite3_column_text(handle, try assert(name)) else { return "" }
         return String(cString: cString)
     }
 
-    func stringOrNil(_ name: String) -> String? {
-        sqlite3_column_type(handle, assert(name)) == SQLITE_NULL ? nil : string(name)
+    func stringOrNil(_ name: String) throws -> String? {
+        sqlite3_column_type(handle, try assert(name)) == SQLITE_NULL ? nil : try string(name)
     }
 
-    func bool(_ name: String) -> Bool { int(name) != 0 }
+    func bool(_ name: String) throws -> Bool { try int(name) != 0 }
 }
 
 // MARK: - SQLite 连接封装

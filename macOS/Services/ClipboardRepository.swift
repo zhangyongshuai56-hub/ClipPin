@@ -19,8 +19,8 @@ actor ClipboardRepository {
         return version
     }
 
-    /// 创建条目（自动去重，§17）。
-    func create(_ entry: NewClipboardEntry) throws -> ClipboardEntry {
+    /// 创建条目（自动去重，§17）。isNew 显式区分新插入与命中已有记录。
+    func create(_ entry: NewClipboardEntry) throws -> CreateItemOutcome {
         try database.createItem(entry)
     }
 
@@ -28,9 +28,14 @@ actor ClipboardRepository {
         try database.getItem(id: id)
     }
 
-    /// 分页列出。boardId 为 nil 表示默认「剪贴板」（全部历史）。
+    /// 分页列出。boardId 为 nil 表示默认「剪贴板」（全部历史，含文件夹成员）。
     func items(boardId: Int64? = nil, limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
         try database.getItems(filter: nil, boardId: boardId, limit: limit, offset: offset)
+    }
+
+    /// 纯历史条目（不含文件夹成员），供全库导出使用。
+    func historyItems(limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {
+        try database.getHistoryOnlyItems(limit: limit, offset: offset)
     }
 
     func pinnedItems(limit: Int = 50, offset: Int = 0) throws -> [ClipboardEntry] {

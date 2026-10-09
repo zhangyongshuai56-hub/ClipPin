@@ -58,14 +58,15 @@ final class CleanupScheduler {
 
     private func scheduleTimer() {
         let interval = TimeInterval(CleanupSettings.intervalMinutes * 60)
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        // 只挂 .common modes（与 ClipboardMonitor 一致），不用 scheduledTimer
+        // （默认挂 default mode，会与 common 重复注册）
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             // Timer 在主 RunLoop 上触发，此处必然在主线程
             guard let self else { return }
             MainActor.assumeIsolated {
                 self.scheduleRun()
             }
         }
-        // .common：菜单展开等 UI 阻塞模式下定时仍触发（与 ClipboardMonitor 一致）
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -82,23 +83,30 @@ final class CleanupScheduler {
     }
 
     /// 执行一轮清理：过期清理（§32）→ 历史上限（§50）→ 孤儿文件清扫（§48）。
-    /// 失败记录日志，不影响下一轮；有删除时通知 UI 刷新（面板列表此前不反映清理结果）。
+    /// 三步各自独立容错：一步失败只记日志，不拖累其余步骤；有删除时通知 UI 刷新。
     @discardableResult
     func runOnce() async -> RunSummary {
         guard let repository else { return RunSummary() }
         var summary = RunSummary()
         do {
             summary.expired = try await repository.cleanupExpired(retention: CleanupSettings.retention)
-            // 0 = 不限制（§50 Unlimited）；跳过调用避免清空全部
-            if CleanupSettings.historyLimit > 0 {
-                summary.trimmed = try await repository.enforceHistoryLimit(CleanupSettings.historyLimit)
-            }
-            summary.orphans = try await repository.sweepOrphanArtifacts()
-            logger.info("cleanup done expired=\(summary.expired) trimmed=\(summary.trimmed) orphans=\(summary.orphans)")
         } catch {
-            logger.error("cleanup failed: \(error.localizedDescription, privacy: .public)")
-            return summary
+            logger.error("expired cleanup failed: \(error.localizedDescription, privacy: .public)")
         }
+        // 0 = 不限制（§50 Unlimited）；DB 层同样设防，这里跳过调用避免无谓查询
+        if CleanupSettings.historyLimit > 0 {
+            do {
+                summary.trimmed = try await repository.enforceHistoryLimit(CleanupSettings.historyLimit)
+            } catch {
+                logger.error("history trim failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        do {
+            summary.orphans = try await repository.sweepOrphanArtifacts()
+        } catch {
+            logger.error("orphan sweep failed: \(error.localizedDescription, privacy: .public)")
+        }
+        logger.info("cleanup done expired=\(summary.expired) trimmed=\(summary.trimmed) orphans=\(summary.orphans)")
         if summary.expired > 0 || summary.trimmed > 0 || summary.orphans > 0 {
             NotificationCenter.default.post(name: .cleanupSchedulerDidCleanup, object: nil)
         }

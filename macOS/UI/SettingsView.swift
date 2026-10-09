@@ -31,13 +31,13 @@ private struct DataSettingsView: View {
     var body: some View {
         Form {
             Section("导出") {
-                Text("把全部文件夹及其中的剪贴板记录导出为一个 .pasteexport 文件（图片一并打包），拷贝到另一台电脑的 Paste 中导入即可。文件与文件夹类记录只保存引用，不打包文件本体。")
+                Text("把剪贴板历史与全部文件夹及其中的记录导出为一个 .pasteexport 文件（图片一并打包），拷贝到另一台电脑的 Paste 中导入即可。文件与文件夹类记录只保存引用，不打包文件本体。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Button("导出全部文件夹…") { chooseExportDestination() }
+                Button("导出全部内容…") { chooseExportDestination() }
             }
             Section("导入") {
-                Text("从 .pasteexport 文件导入：同名文件夹合并，重复内容自动去重合并，命名标题与置顶状态保留，文件类记录自动跳过并计数。")
+                Text("从 .pasteexport 文件导入：剪贴板历史与文件夹合并，重复内容自动去重合并，命名标题、置顶与移除状态保留，文件类记录自动跳过并计数。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button("从文件导入…") { chooseImportFile() }
@@ -180,6 +180,13 @@ private struct GeneralSettingsView: View {
         }
         .formStyle(.grouped)
         .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
+        .task {
+            // 授权发生在系统设置里：页面存活期间轮询同步，用户授权回来无需重开设置页
+            while !Task.isCancelled {
+                accessibilityTrusted = PasteService.shared.isAccessibilityTrusted
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         .onAppear {
             launchAtLogin = LaunchAtLoginService.isEnabled
             accessibilityTrusted = PasteService.shared.isAccessibilityTrusted
@@ -346,6 +353,12 @@ private struct ClipboardSettingsView: View {
             Task { await CleanupScheduler.shared.runOnce() }
         }
         .onChange(of: intervalValue) {
+            // 输入钳制并回写：0 / 负数 / 超界直接修正，避免「显示 0 实际每分钟跑一次」
+            // 的显示值与生效值脱节（写回触发的一次 onChange 中值已合法，不再改写）
+            let clamped = min(max(intervalValue, 1), CleanupSettings.intervalUnit.maxValue)
+            if clamped != intervalValue {
+                intervalValue = clamped
+            }
             CleanupScheduler.shared.restartSchedule()
         }
         .onChange(of: intervalUnitRaw) {
@@ -434,9 +447,9 @@ private struct PrivacySettingsView: View {
                         newBundleID = ""
                         refresh()
                     }
-                    .disabled(newBundleID.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!ExcludedApps.isValidBundleID(newBundleID))
                 }
-                Text("按 Bundle ID 添加；这些应用前台时剪贴板不会被记录。")
+                Text("按 Bundle ID 添加（如 com.example.app）；这些应用前台时剪贴板不会被记录。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -451,6 +464,8 @@ private struct PrivacySettingsView: View {
 
 /// 关于页：版本与构建号。
 private struct AboutSettingsView: View {
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "doc.on.clipboard")
@@ -465,7 +480,7 @@ private struct AboutSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .preferredColorScheme(AppearanceMode.stored.colorScheme)
+        .preferredColorScheme(AppearanceMode(rawValue: appearanceRaw)?.colorScheme)
     }
 }
 
@@ -503,6 +518,22 @@ extension ClipboardSettingsView {
             // 安全要求：全局热键必须含 ⌘/⌃/⌥ 之一，避免裸字母键吞掉正常输入
             guard carbon & UInt32(cmdKey | controlKey | optionKey) != 0 else {
                 recordingHint = "组合键需包含 ⌘ / ⌃ / ⌥ 之一，再试一次"
+                return nil
+            }
+
+            // 面板内已占用纯 ⌘ 快捷键：全局热键设成同组合会在面板里抢先触发收起，
+            // 让 ⌘F 搜索 / ⌘P 置顶等失灵（带 ⇧/⌃/⌥ 的组合不冲突）
+            let panelReserved: Set<UInt32> = [
+                UInt32(kVK_ANSI_F),            // ⌘F 搜索
+                UInt32(kVK_ANSI_C),            // ⌘C 复制到剪贴板
+                UInt32(kVK_ANSI_E),            // ⌘E 编辑内容
+                UInt32(kVK_ANSI_R),            // ⌘R 重命名
+                UInt32(kVK_ANSI_P),            // ⌘P 置顶
+                UInt32(kVK_Return),            // ⌘↩ 粘贴到当前应用
+                UInt32(kVK_ANSI_KeypadEnter),  // ⌘↩（小键盘）
+            ]
+            if carbon == UInt32(cmdKey), panelReserved.contains(UInt32(event.keyCode)) {
+                recordingHint = "该组合已被面板内快捷键占用，请换一个"
                 return nil
             }
 

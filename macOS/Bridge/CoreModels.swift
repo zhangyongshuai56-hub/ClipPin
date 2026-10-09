@@ -136,6 +136,13 @@ struct ItemEditOutcome {
     let merged: Bool
 }
 
+/// 创建条目的结果：entry 为库中最终生效的行（去重命中时是已存在的记录）。
+struct CreateItemOutcome {
+    let entry: ClipboardEntry
+    /// true = 新插入；false = 命中同 content_hash 的已有记录（仅 touch）。
+    let isNew: Bool
+}
+
 /// 新条目输入（§16 方向：UI → 存储层）。
 struct NewClipboardEntry: Sendable {
     var itemType: ClipboardEntryType = .text
@@ -181,7 +188,7 @@ enum UserFacingError: LocalizedError, Sendable {
         case .notFound(let id): self = .notFound(id)
         case .permissionDenied(let message): self = .permissionDenied(message)
         case .fileSystem(let message): self = .fileSystem(message)
-        case .migration(_, let message): self = .migration(message)
+        case .migration(let target, let message): self = .migration("schema v\(target): \(message)")
         }
     }
 

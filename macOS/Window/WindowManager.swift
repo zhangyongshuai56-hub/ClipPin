@@ -42,6 +42,11 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
         let savedSize = Self.loadPanelSize()
         let window = clipboardWindow ?? makeClipboardWindow(repository: repository, contentSize: savedSize)
+        // 存档尺寸按当前屏幕钳上限：大屏存下的大尺寸换到小屏 / 拔掉显示器后不致溢出
+        let clamped = Self.clampedPanelSize(window.frame.size)
+        if clamped != window.frame.size {
+            window.setContentSize(clamped)
+        }
 
         shownAt = Date()
         panelHadKeyFocus = false
@@ -118,6 +123,9 @@ final class WindowManager: NSObject, NSWindowDelegate {
                 guard generation == self.transitionGeneration, self.clipboardWindow === window else { return }
                 window.orderOut(nil)
                 window.alphaValue = 1
+                // 面板不可见期间无需监听全局点击：常驻监听让 App 存活期内每次系统级
+                // 鼠标点击都进回调；下次 showClipboardWindow 会重装
+                self.removeClickOutsideObserver()
             }
         })
     }
@@ -209,6 +217,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     /// resignActive 事件，全局鼠标监听负责在点击面板外时关闭。
     /// 全局监听只收到应用外部的点击，无需再判断点击位置；
     /// 宽限期与 Quick Paste 守卫与失活路径一致，两条路径幂等。
+    /// 生命周期与面板可见性绑定：hideClipboardWindow 完成时移除。
     private func installClickOutsideObserverIfNeeded() {
         guard clickOutsideObserver == nil else { return }
         clickOutsideObserver = NSEvent.addGlobalMonitorForEvents(
@@ -220,6 +229,13 @@ final class WindowManager: NSObject, NSWindowDelegate {
                 guard !PasteService.shared.isBusy else { return }
                 self.hideClipboardWindow()
             }
+        }
+    }
+
+    private func removeClickOutsideObserver() {
+        if let clickOutsideObserver {
+            NSEvent.removeMonitor(clickOutsideObserver)
+            self.clickOutsideObserver = nil
         }
     }
 
@@ -250,5 +266,19 @@ final class WindowManager: NSObject, NSWindowDelegate {
             return ClipboardWindow.defaultContentSize
         }
         return NSSize(width: parts[0], height: parts[1])
+    }
+
+    /// 面板尺寸按鼠标所在屏幕的可用区钳上限（margin 与 windowWillResize 一致）。
+    /// 只钳上限不动下限（用户要求不限制最小尺寸）。
+    private static func clampedPanelSize(_ size: NSSize) -> NSSize {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else {
+            return size
+        }
+        let visible = screen.visibleFrame
+        let margin: CGFloat = 24
+        return NSSize(
+            width: min(size.width, max(60, visible.width - margin * 2)),
+            height: min(size.height, max(60, visible.height - margin * 2)))
     }
 }

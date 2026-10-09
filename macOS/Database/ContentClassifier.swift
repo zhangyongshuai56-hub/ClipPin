@@ -52,8 +52,30 @@ func detectCodeLanguage(_ text: String) -> String? {
         return "json"
     }
 
-    // 脚本 shebang
-    if trimmed.hasPrefix("#!") { return "shell" }
+    // 脚本 shebang：按解释器名细分；无法识别的解释器归为 shell。
+    // 支持「#!/usr/bin/env python3」「#!env -S bun」等写法。
+    if trimmed.hasPrefix("#!") {
+        let firstLine = String(trimmed.split(separator: "\n", omittingEmptySubsequences: false).first ?? "")
+        var tokens = firstLine.dropFirst(2)
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map(String.init)
+        // env 可能写作相对名（env）或绝对路径（/usr/bin/env）
+        if let first = tokens.first, URL(fileURLWithPath: first).lastPathComponent == "env" {
+            tokens.removeFirst()
+            while let flag = tokens.first, flag.hasPrefix("-") { tokens.removeFirst() }
+        }
+        if let program = tokens.first {
+            switch URL(fileURLWithPath: program).lastPathComponent.lowercased() {
+            case "python", "python3", "python2": return "python"
+            case "node", "nodejs", "deno", "bun": return "javascript"
+            case "ruby": return "ruby"
+            case "perl": return "perl"
+            case "php": return "php"
+            default: return "shell"
+            }
+        }
+        return "shell"
+    }
 
     let lower = trimmed.lowercased()
     func score(_ markers: [String]) -> Int {
@@ -66,22 +88,26 @@ func detectCodeLanguage(_ text: String) -> String? {
     let sqlMarkers = ["select ", "from ", "where ", "insert into", "update ", "delete from", "join ", "group by"]
     let shellMarkers = ["sudo ", "brew ", "apt ", "cd ", "grep ", "echo ", "export ", "git ", "&&"]
 
-    // 注意平局语义：>= 让后面的候选拿走平局（Rust max_by_key 返回最后一个最大值）
+    // 注意平局语义：>= 让后面的候选拿走平局（Rust max_by_key 返回最后一个最大值）。
+    // SQL 关键词几乎全是英语常用词（select/from/where/update/join），阈值过低会把
+    // 「Please select from the menu」这类散文判成代码，因此单独提高到 3。
     var bestLanguage = ""
     var bestScore = 0
-    for (language, value) in [
-        ("swift", score(swiftMarkers)),
-        ("python", score(pythonMarkers)),
-        ("javascript", score(javascriptMarkers)),
-        ("sql", score(sqlMarkers)),
-        ("shell", score(shellMarkers)),
+    for (language, markers, threshold) in [
+        ("swift", swiftMarkers, 2),
+        ("python", pythonMarkers, 2),
+        ("javascript", javascriptMarkers, 2),
+        ("sql", sqlMarkers, 3),
+        ("shell", shellMarkers, 2),
     ] {
+        let value = score(markers)
+        guard value >= threshold else { continue }
         if value >= bestScore {
             bestScore = value
             bestLanguage = language
         }
     }
-    return bestScore >= 2 ? bestLanguage : nil
+    return bestScore > 0 ? bestLanguage : nil
 }
 
 // MARK: - 内容哈希（§17，port of dedup.rs）

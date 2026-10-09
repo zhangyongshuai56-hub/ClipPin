@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.start()
             clipboardMonitor = monitor
 
-            // §32/§50：启动清扫一次，此后每 6 小时一轮
+            // §32/§50：启动清扫一次，此后按用户自定义频率轮询（默认每 1 小时）
             CleanupScheduler.shared.configure(repository: repository)
 
             registerGlobalShortcut()

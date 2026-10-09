@@ -13,6 +13,8 @@ enum QuickPasteOutcome {
     case writeFailed
     /// 未能完成粘贴：目标缺失 / 激活被拒 / 焦点未落位。
     case failed
+    /// 已有一次粘贴在编排中，本次触发被忽略（连续触发会让两次快照恢复交错，污染用户剪贴板）。
+    case inProgress
 }
 
 /// Quick Paste 服务（§37、§38）。
@@ -29,6 +31,9 @@ final class PasteService {
 
     /// Quick Paste 进行中标记：点击外部关闭的守卫（激活目标应用会触发失活）。
     var isBusy = false
+
+    /// Quick Paste 编排互斥标记：runQuickPaste 重入守卫（与 isBusy 的点击关闭守卫独立）。
+    private(set) var isPasting = false
 
     /// 粘贴目标应用名称（反馈文案「✓ 已粘贴到 Safari」用，需求 §18）。
     var previousAppName: String? { previousApp?.localizedName }
@@ -131,18 +136,29 @@ final class PasteService {
     /// 在成功反馈展示后自行执行。
     func runQuickPaste(write: () -> Bool) async -> QuickPasteOutcome {
         guard isAccessibilityTrusted else { return .accessibilityDenied }
+        guard !isPasting else { return .inProgress }
+        isPasting = true
+        defer { isPasting = false }
         let snapshot = captureCurrentContents()
         guard write() else { return .writeFailed }
         isBusy = true
         defer { isBusy = false }
+        // 写板后立刻记录 changeCount，供恢复前校验（快照里没有这个信息）
+        let writtenChangeCount = NSPasteboard.general.changeCount
         let pasted = await pasteToPreviousApp()
         guard pasted else {
             // 失败也必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
             restore(snapshot)
             return .failed
         }
-        // 确保目标 App 读取完成后再恢复原剪贴板（需求 §14）
+        // 确保目标 App 读取完成后再恢复原剪贴板（需求 §14）。
+        // 恢复前校验 changeCount：等待期间若被第三方改写（密码管理器自动清除、
+        // 其他剪贴板工具写入等），恢复快照会覆盖第三方的新内容——此时放弃恢复。
         try? await Task.sleep(for: .milliseconds(600))
+        if NSPasteboard.general.changeCount != writtenChangeCount {
+            logger.info("skip pasteboard restore: clipboard changed by another writer")
+            return .success(targetName: previousAppName)
+        }
         restore(snapshot)
         return .success(targetName: previousAppName)
     }

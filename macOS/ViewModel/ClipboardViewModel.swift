@@ -84,6 +84,7 @@ final class ClipboardViewModel {
     private var searchTask: Task<Void, Never>?
     private var monitorCancellable: AnyCancellable?
     private var cleanupCancellable: AnyCancellable?
+    private var libraryChangeCancellable: AnyCancellable?
     /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
 
@@ -115,6 +116,15 @@ final class ClipboardViewModel {
             .sink { [weak self] _ in
                 Task { await self?.refresh() }
             }
+        // 导入备份等批量变更后面板立即刷新（此前要等下一次捕获才看到导入结果）
+        libraryChangeCancellable = NotificationCenter.default
+            .publisher(for: .pasteLibraryDidChange)
+            .sink { [weak self] _ in
+                Task {
+                    await self?.refreshBoards()
+                    await self?.refresh()
+                }
+            }
     }
 
     // MARK: - 加载
@@ -135,7 +145,10 @@ final class ClipboardViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        let offset = reset ? 0 : entries.count
+        // 仓储里待删条目尚未移除：偏移量要计入它们，否则翻页会把已展示的
+        // 尾部条目再返回一遍（重复 id 破坏 ScrollViewReader 与选中态）。
+        // 极端情况下捕获 touch 重排会残余少量误差，属可接受的次级折衷。
+        let offset = reset ? 0 : entries.count + pendingDeletes.count
         do {
             var page: [ClipboardEntry]
             if isSearchActive {
@@ -238,18 +251,9 @@ final class ClipboardViewModel {
         }
     }
 
-    func deleteBoard(_ board: Pinboard) async {
-        do {
-            try await repository.deleteBoard(id: board.id)
-            if selectedBoardID == board.id {
-                selectedBoardID = nil
-            }
-            await refreshBoards()
-            await load(reset: true)
-        } catch {
-            setError(error)
-        }
-    }
+    /// 注意：文件夹删除只有「延迟 4 秒可撤销」一条路径（deleteBoard(_:)）。
+    /// 不要另加 async 立即删除重载——调用点 `Task { await deleteBoard(...) }`
+    /// 的重载决议会优先选中 async 版本，让撤销机制静默失效（历史教训）。
 
     /// 重命名文件夹（chip 右键「重命名…」）。
     func renameBoard(_ board: Pinboard, to name: String) async {
@@ -314,6 +318,9 @@ final class ClipboardViewModel {
             showFeedback(.idle, autoClearAfter: nil)
         case .failed:
             showFeedback(.failed("无法粘贴到当前应用"), autoClearAfter: .seconds(3))
+        case .inProgress:
+            // 已有一次粘贴在编排中：忽略本次触发，不打断进行中的反馈
+            break
         }
     }
 

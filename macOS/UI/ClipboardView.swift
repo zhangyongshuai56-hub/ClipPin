@@ -39,9 +39,21 @@ struct ClipboardView: View {
         .preferredColorScheme(appearance.colorScheme)
         .task {
             await viewModel.loadInitial()
-            viewModel.requestSearchFocus()
         }
-        .onAppear { installKeyboardMonitor() }
+        // 搜索聚焦请求（面板呼出 / 菜单栏「搜索剪贴板」）：SearchField 尚未在层级里时
+        // 先展开搜索模式，SearchField.onAppear 会自动聚焦——否则请求永远无人消费
+        .onChange(of: viewModel.searchFocusRequest) {
+            if viewModel.searchFocusRequest > 0, !isSearching {
+                isSearching = true
+            }
+        }
+        .onAppear {
+            installKeyboardMonitor()
+            // 面板首次创建时，焦点请求可能先于视图安装发出：补消费一次
+            if viewModel.searchFocusRequest > 0, !isSearching {
+                isSearching = true
+            }
+        }
         .onDisappear { removeKeyboardMonitor() }
         .overlay(alignment: .topTrailing) {
             if viewModel.feedback != .idle {
@@ -157,6 +169,11 @@ struct ClipboardView: View {
     }
 
     /// 板 chips：默认「剪贴板」+ 用户创建的文件夹。
+    /// 溢出与否按实际宽度判定（几何检测），不再按文件夹数量猜——
+    /// 两个长名文件夹在窄窗口下同样需要滚动。
+    @State private var chipsContentWidth: CGFloat = 0
+    @State private var chipsViewportWidth: CGFloat = 0
+
     private var boardChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -175,8 +192,31 @@ struct ClipboardView: View {
                     )
                 }
             }
+            .background(WidthReader<ChipsContentWidthKey>())
         }
-        .scrollDisabled(viewModel.boards.count < 3)
+        .background(WidthReader<ChipsViewportWidthKey>())
+        .onPreferenceChange(ChipsContentWidthKey.self) { chipsContentWidth = $0 }
+        .onPreferenceChange(ChipsViewportWidthKey.self) { chipsViewportWidth = $0 }
+        .scrollDisabled(chipsContentWidth <= chipsViewportWidth)
+    }
+
+    /// 宽度采集器：配合 PreferenceKey 做内容/视口宽度对比。
+    private struct WidthReader<Key: PreferenceKey>: View where Key.Value == CGFloat {
+        var body: some View {
+            GeometryReader { proxy in
+                Color.clear.preference(key: Key.self, value: proxy.size.width)
+            }
+        }
+    }
+
+    private struct ChipsContentWidthKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    }
+
+    private struct ChipsViewportWidthKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
     }
 
     private func boardChip(title: String, color: Color?, isSelected: Bool, boardID: Int64?) -> some View {
@@ -205,7 +245,9 @@ struct ClipboardView: View {
                 }
                 Button("删除文件夹", role: .destructive) {
                     if let board = viewModel.boards.first(where: { $0.id == boardID }) {
-                        Task { await viewModel.deleteBoard(board) }
+                        // 可撤销删除（延迟 4 秒提交，toast 可撤销）；
+                        // 此前误选 async 重载导致立即物理删除、撤销成死代码
+                        viewModel.deleteBoard(board)
                     }
                 }
             }
@@ -282,14 +324,13 @@ struct ClipboardView: View {
         Button(entry.isPinned ? "取消置顶" : "置顶") {
             Task { await viewModel.togglePin(entry) }
         }
-        .keyboardShortcut("p", modifiers: .command)
         Divider()
         if entry.isTextEditable {
+            // 面板级快捷键（⌘E / ⌘R / ⌘P）由键盘 monitor 统一处理作用于选中卡片；
+            // 菜单项上的 keyboardShortcut 不会被触发（先被 monitor 消费），只会造成误导
             Button("编辑内容…") { editingEntry = entry }
-                .keyboardShortcut("e", modifiers: .command)
         }
         Button("重命名…") { renamingEntry = entry }
-            .keyboardShortcut("r", modifiers: .command)
         Divider()
         if viewModel.selectedBoardID != nil {
             Button("移出当前文件夹") {
@@ -324,8 +365,10 @@ struct ClipboardView: View {
     private func dragProvider(for entry: ClipboardEntry) -> NSItemProvider {
         switch entry.itemType {
         case .image:
-            if let path = entry.imagePath, let image = NSImage(contentsOfFile: path) {
-                return NSItemProvider(object: image)
+            // NSItemProvider(contentsOf:) 惰性按需读取文件；
+            // NSImage(contentsOfFile:) 会在拖拽开始瞬间主线程解码整图（上限 50MB）
+            if let path = entry.imagePath {
+                return NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
             }
         case .file, .folder:
             if let path = entry.filePath {

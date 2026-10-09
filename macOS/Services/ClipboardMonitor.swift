@@ -26,6 +26,10 @@ final class ClipboardMonitor {
     private var lastChangeCount: Int = -1
     /// 后台捕获进行中标记，避免重复并发捕获。
     private var isCapturing = false
+    /// 当前捕获的开始时间；看门狗据此复位卡死的捕获状态，避免监听静默停摆。
+    private var captureStartedAt: Date?
+    /// 捕获看门狗超时：正常捕获毫秒级，超过即视为仓储层异常卡死。
+    private static let captureWatchdogTimeout: TimeInterval = 15
 
     init(appState: AppState, repository: ClipboardRepository) {
         self.appState = appState
@@ -34,7 +38,9 @@ final class ClipboardMonitor {
 
     func start() {
         guard timer == nil else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
+        // 只挂 .common modes：菜单展开（event tracking）时轮询不中断；
+        // 不用 scheduledTimer（默认挂 default mode，会与 common 重复注册）
+        let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
             // Timer 在主 RunLoop 上触发，此处必然在主线程
             guard let self else { return }
             MainActor.assumeIsolated {
@@ -74,8 +80,19 @@ final class ClipboardMonitor {
             return
         }
 
-        // 上一拍捕获尚未完成；等完成后下一拍会看到新的 changeCount
-        guard !isCapturing else { return }
+        // 上一拍捕获尚未完成；等完成后下一拍会看到新的 changeCount。
+        // 看门狗：仓储层异常卡死（磁盘 / SQLite 锁）时复位状态并告警，
+        // 否则 isCapturing 永不释放，监听静默死亡且无任何日志。
+        if isCapturing {
+            if let started = captureStartedAt,
+               Date().timeIntervalSince(started) > Self.captureWatchdogTimeout {
+                logger.error("capture stuck for \(Int(Date().timeIntervalSince(started)), privacy: .public)s; watchdog reset")
+                isCapturing = false
+                captureStartedAt = nil
+            } else {
+                return
+            }
+        }
 
         // 前台应用：用于来源记录（§33）与排除检查（§39）。NSWorkspace 需在主线程调用。
         let frontApp = NSWorkspace.shared.frontmostApplication
@@ -89,7 +106,8 @@ final class ClipboardMonitor {
         // 先更新基线：捕获期间若有新变更，下一拍仍能看到更大的 changeCount
         lastChangeCount = changeCount
         isCapturing = true
-        let captureStartedAt = Date()
+        let startedAt = Date()
+        captureStartedAt = startedAt
 
         let sourceName = frontApp?.localizedName
         let repository = self.repository
@@ -102,8 +120,8 @@ final class ClipboardMonitor {
                     var savedCount = 0
                     for entry in payload.toNewItems() {
                         do {
-                            let saved = try await repository.create(entry)
-                            lastID = saved.id
+                            let outcome = try await repository.create(entry)
+                            lastID = outcome.entry.id
                             savedCount += 1
                         } catch {
                             // 库层错误已带上下文；这里保证捕获失败不影响监听循环
@@ -111,7 +129,7 @@ final class ClipboardMonitor {
                         }
                     }
                     if savedCount > 0 {
-                        let elapsedMs = Int(Date().timeIntervalSince(captureStartedAt) * 1000)
+                        let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
                         // §84：日志只记录 id / 大小 / 耗时，不记录内容原文
                         await self.captureDidSave(id: lastID ?? 0, byteSize: payload.byteSize, elapsedMs: elapsedMs)
                     }
@@ -142,5 +160,6 @@ final class ClipboardMonitor {
 
     private func captureDidFinish() {
         isCapturing = false
+        captureStartedAt = nil
     }
 }

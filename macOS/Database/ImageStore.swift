@@ -51,10 +51,11 @@ struct ImageStore {
     }
 
     /// 清扫孤儿产物文件（§48）：不在引用集合中的文件删除。
+    /// 原图与缩略图的引用集合分开比对，避免同名文件跨目录误保留/误删。
     /// 一小时内的 `.tmp-` 文件视为进行中的转存，跳过以避免竞争。
-    func sweepOrphans(referencedFileNames: Set<String>) throws -> Int {
-        var removed = try sweepDirectory(imagesDirectory, referenced: referencedFileNames)
-        removed += try sweepDirectory(thumbnailsDirectory, referenced: referencedFileNames)
+    func sweepOrphans(referencedImageNames: Set<String>, referencedThumbnailNames: Set<String>) throws -> Int {
+        var removed = try sweepDirectory(imagesDirectory, referenced: referencedImageNames)
+        removed += try sweepDirectory(thumbnailsDirectory, referenced: referencedThumbnailNames)
         return removed
     }
 

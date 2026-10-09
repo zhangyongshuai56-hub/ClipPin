@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - SQLite 数据库入口（port of storage/database.rs + search/search_engine.rs）
 //
@@ -6,7 +7,7 @@ import Foundation
 // 访问由 ClipboardRepository actor 串行化；单连接 + WAL + busy_timeout。
 
 /// 当前 schema 版本。
-let pasteSchemaVersion = 4
+let pasteSchemaVersion = 5
 
 /// 迁移 SQL 列表，下标 `i` 对应目标版本 `i + 1`。与 Rust 版逐行对齐，禁止修改历史条目。
 private let pasteMigrations: [String] = [
@@ -94,6 +95,25 @@ private let pasteMigrations: [String] = [
 
     ALTER TABLE clipboard_items ADD COLUMN title_is_custom INTEGER NOT NULL DEFAULT 0;
     """,
+    // v5：FTS 更新触发器加 WHEN 限制——仅索引列（title/text_content/url/file_path/
+    // source_app_name）变化时才重建 trigram 索引行。dedup touch、pin、移动文件夹等
+    // 高频 UPDATE 只改非索引列，此前每次都白做一次与文本长度正相关的索引重写。
+    """
+    DROP TRIGGER IF EXISTS clipboard_items_fts_au;
+
+    CREATE TRIGGER clipboard_items_fts_au AFTER UPDATE ON clipboard_items
+    WHEN old.title IS NOT new.title
+        OR old.text_content IS NOT new.text_content
+        OR old.url IS NOT new.url
+        OR old.file_path IS NOT new.file_path
+        OR old.source_app_name IS NOT new.source_app_name
+    BEGIN
+        INSERT INTO clipboard_fts(clipboard_fts, rowid, title, text_content, url, file_path, source_app_name)
+        VALUES ('delete', old.id, old.title, old.text_content, old.url, old.file_path, old.source_app_name);
+        INSERT INTO clipboard_fts(rowid, title, text_content, url, file_path, source_app_name)
+        VALUES (new.id, new.title, new.text_content, new.url, new.file_path, new.source_app_name);
+    END;
+    """,
 ]
 
 /// 单次查询返回的最大条数，防御一次性加载过多数据（§57）。
@@ -102,6 +122,14 @@ private let maxPageSize = 1000
 final class PasteDatabase {
     private let connection: SQLiteDatabase
     private let imageStore: ImageStore
+    /// 内存库（自测）的临时图片目录；deinit 时删除，不在 /tmp 遗留垃圾。
+    private let transientStorageRoot: URL?
+
+    deinit {
+        if let transientStorageRoot {
+            try? FileManager.default.removeItem(at: transientStorageRoot)
+        }
+    }
 
     /// 打开（或创建）数据库文件；存储根目录取数据库文件的祖父目录（§20）。
     convenience init(path: String) throws {
@@ -115,12 +143,13 @@ final class PasteDatabase {
     convenience init(inMemoryForTesting: Bool) throws {
         let storageRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("paste-images-\(getpid())-\(UUID().uuidString)", isDirectory: true)
-        try self.init(databasePath: ":memory:", storageRoot: storageRoot)
+        try self.init(databasePath: ":memory:", storageRoot: storageRoot, transientStorageRoot: storageRoot)
     }
 
-    private init(databasePath: String, storageRoot: URL) throws {
+    private init(databasePath: String, storageRoot: URL, transientStorageRoot: URL? = nil) throws {
         connection = try SQLiteDatabase(path: databasePath)
         imageStore = try ImageStore(storageRoot: storageRoot)
+        self.transientStorageRoot = transientStorageRoot
         try runMigrations(connection)
     }
 
@@ -149,7 +178,8 @@ final class PasteDatabase {
 
     /// 创建条目（§54 create_item）。相同 content_hash 不重复入库（§17）：
     /// 仅刷新 updated_at 并更新来源，保留 created_at 与 Pin 状态。
-    func createItem(_ entry: NewClipboardEntry) throws -> ClipboardEntry {
+    /// 返回 isNew 显式区分「新插入」与「命中已有记录」，调用方不必靠字段值反推。
+    func createItem(_ entry: NewClipboardEntry) throws -> CreateItemOutcome {
         let resolved = try resolveNewItem(entry)
         let effective = resolved.effective
         let now = nowMillis()
@@ -157,14 +187,25 @@ final class PasteDatabase {
         let title = entry.title ?? deriveTitle(for: effective)
         let preview = derivePreview(for: effective)
 
+        var isNew = true
         let id: Int64 = try connection.transaction {
             if let existing = try connection.queryFirst(
-                "SELECT id FROM clipboard_items WHERE content_hash = ?1",
-                [.text(resolved.contentHash)], map: { $0.int("id") }) {
-                try connection.run(
-                    "UPDATE clipboard_items SET updated_at = ?2, source_app = COALESCE(?3, source_app), source_app_name = COALESCE(?4, source_app_name) WHERE id = ?1",
-                    [.int(existing), .int(now), .textOrNil(entry.sourceApp), .textOrNil(entry.sourceAppName)])
-                return existing
+                "SELECT id, removed_from_history FROM clipboard_items WHERE content_hash = ?1",
+                [.text(resolved.contentHash)],
+                map: { (id: try $0.int("id"), removed: try $0.bool("removed_from_history")) }) {
+                // 重新复制曾从历史移除、仅收藏在文件夹中的内容时恢复其在历史中的可见性，
+                // 否则用户视角下「再次复制」毫无反应（唯一索引保证同 hash 至多一行）。
+                if existing.removed {
+                    try connection.run(
+                        "UPDATE clipboard_items SET updated_at = ?2, removed_from_history = 0, source_app = COALESCE(?3, source_app), source_app_name = COALESCE(?4, source_app_name) WHERE id = ?1",
+                        [.int(existing.id), .int(now), .textOrNil(entry.sourceApp), .textOrNil(entry.sourceAppName)])
+                } else {
+                    try connection.run(
+                        "UPDATE clipboard_items SET updated_at = ?2, source_app = COALESCE(?3, source_app), source_app_name = COALESCE(?4, source_app_name) WHERE id = ?1",
+                        [.int(existing.id), .int(now), .textOrNil(entry.sourceApp), .textOrNil(entry.sourceAppName)])
+                }
+                isNew = false
+                return existing.id
             }
             // 新图片：先转存文件拿到路径，再入库；转存失败则整体失败，不落脏行
             var imagePath: String?
@@ -202,7 +243,7 @@ final class PasteDatabase {
                 ])
             return connection.lastInsertRowID
         }
-        return try getItem(id: id)
+        return CreateItemOutcome(entry: try getItem(id: id), isNew: isNew)
     }
 
     /// 读取单条。
@@ -219,6 +260,18 @@ final class PasteDatabase {
             throw PasteError.invalidInput("page range out of range: limit=\(limit) offset=\(offset)")
         }
         return try listItems(filter: filter, boardId: boardId, limit: min(limit, maxPageSize), offset: offset)
+    }
+
+    /// 纯历史条目（board_id IS NULL 且未软删除），供全库导出的「剪贴板历史」容器。
+    /// 与默认「剪贴板」视图不同——视图按设计包含文件夹成员；文件夹成员随所在文件夹导出。
+    func getHistoryOnlyItems(limit: Int, offset: Int) throws -> [ClipboardEntry] {
+        guard limit >= 0, offset >= 0 else {
+            throw PasteError.invalidInput("page range out of range: limit=\(limit) offset=\(offset)")
+        }
+        return try connection.query(
+            "SELECT * FROM clipboard_items WHERE board_id IS NULL AND removed_from_history = 0 ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+            [.int(Int64(min(limit, maxPageSize))), .int(Int64(offset))],
+            map: Self.makeEntry)
     }
 
     /// 置顶条目（§31），按最近使用排序。
@@ -258,16 +311,19 @@ final class PasteDatabase {
     }
 
     /// 批量删除，返回实际删除数。删除的条目若带图片产物，文件一并清理（§32）。
+    /// 全部 chunk 在同一事务内执行：任一 chunk 失败整体回滚，不留部分删除。
     func deleteItems(ids: [Int64]) throws -> Int {
         guard !ids.isEmpty else { return 0 }
         var deleted = 0
         var artifacts: [(String?, String?)] = []
-        for chunk in stride(from: 0, to: ids.count, by: 500).map({ Array(ids[$0..<min($0 + 500, ids.count)]) }) {
-            artifacts += try fetchArtifacts(ids: chunk)
-            let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
-            deleted += try connection.run(
-                "DELETE FROM clipboard_items WHERE id IN (\(placeholders))",
-                chunk.map { .int($0) })
+        try connection.transaction {
+            for chunk in stride(from: 0, to: ids.count, by: 500).map({ Array(ids[$0..<min($0 + 500, ids.count)]) }) {
+                artifacts += try fetchArtifacts(ids: chunk)
+                let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
+                deleted += try connection.run(
+                    "DELETE FROM clipboard_items WHERE id IN (\(placeholders))",
+                    chunk.map { .int($0) })
+            }
         }
         artifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
         return deleted
@@ -284,7 +340,7 @@ final class PasteDatabase {
     func removeItemFromHistory(id: Int64) throws -> ItemRemovalOutcome {
         let boardId: Int64?? = try connection.queryFirst(
             "SELECT board_id FROM clipboard_items WHERE id = ?1",
-            [.int(id)]) { $0.intOrNil("board_id") }
+            [.int(id)]) { try $0.intOrNil("board_id") }
         guard let boardId else { throw PasteError.notFound(id) }
         if boardId != nil {
             try connection.run(
@@ -338,39 +394,64 @@ final class PasteDatabase {
         let contentHash = try hashForItem(content: text)
         let now = nowMillis()
 
-        // 与已有记录重复 → 合并：本条删除（防御性清理产物），目标条目 touch
-        if let keptId = try connection.queryFirst(
-            "SELECT id FROM clipboard_items WHERE content_hash = ?1 AND id != ?2",
-            [.text(contentHash), .int(id)], map: { $0.int("id") }) {
-            let artifacts = try fetchArtifacts(ids: [id])
-            try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
-            try connection.run(
-                "UPDATE clipboard_items SET updated_at = ?2 WHERE id = ?1",
-                [.int(keptId), .int(now)])
-            artifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
-            let item = try getItem(id: keptId)
+        // 与已有记录重复 → 合并：本条删除（防御性清理产物），组织信息归并到目标条目。
+        // 归并规则：任一侧 Pin 则 Pin；任一侧在历史可见则可见；文件夹归属优先保留目标侧，
+        // 目标侧无文件夹时继承本条；创建时间取更早者。
+        var mergedId: Int64?
+        var mergedArtifacts: [(String?, String?)] = []
+        try connection.transaction {
+            if let kept = try connection.queryFirst(
+                "SELECT id, board_id FROM clipboard_items WHERE content_hash = ?1 AND id != ?2",
+                [.text(contentHash), .int(id)],
+                map: { (id: try $0.int("id"), boardId: try $0.intOrNil("board_id")) }) {
+                mergedArtifacts = try fetchArtifacts(ids: [id])
+                try connection.run(
+                    """
+                    UPDATE clipboard_items
+                    SET updated_at = ?2,
+                        is_pinned = MAX(is_pinned, ?3),
+                        removed_from_history = MIN(removed_from_history, ?4),
+                        board_id = COALESCE(board_id, ?5),
+                        created_at = MIN(created_at, ?6)
+                    WHERE id = ?1
+                    """,
+                    [
+                        .int(kept.id),
+                        .int(now),
+                        .int(existing.isPinned ? 1 : 0),
+                        .int(existing.removedFromHistory ? 1 : 0),
+                        .intOrNil(kept.boardId),
+                        .int(Int64(existing.createdAt.timeIntervalSince1970 * 1000)),
+                    ])
+                try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
+                mergedId = kept.id
+            } else {
+                try connection.run(
+                    """
+                    UPDATE clipboard_items
+                    SET type = ?2, text_content = ?3, url = ?4, title = ?5, preview = ?6,
+                        metadata = ?7, content_size = ?8, content_hash = ?9, updated_at = ?10
+                    WHERE id = ?1
+                    """,
+                    [
+                        .int(id),
+                        .text(classified.databaseKey),
+                        .text(text),
+                        .textOrNil(url),
+                        .textOrNil(title),
+                        .textOrNil(preview),
+                        .textOrNil(metadata),
+                        .int(Int64(text.utf8.count)),
+                        .text(contentHash),
+                        .int(now),
+                    ])
+            }
+        }
+        mergedArtifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
+        if let mergedId {
+            let item = try getItem(id: mergedId)
             return ItemEditOutcome(entry: item, merged: true)
         }
-
-        try connection.run(
-            """
-            UPDATE clipboard_items
-            SET type = ?2, text_content = ?3, url = ?4, title = ?5, preview = ?6,
-                metadata = ?7, content_size = ?8, content_hash = ?9, updated_at = ?10
-            WHERE id = ?1
-            """,
-            [
-                .int(id),
-                .text(classified.databaseKey),
-                .text(text),
-                .textOrNil(url),
-                .textOrNil(title),
-                .textOrNil(preview),
-                .textOrNil(metadata),
-                .int(Int64(text.utf8.count)),
-                .text(contentHash),
-                .int(now),
-            ])
         let item = try getItem(id: id)
         return ItemEditOutcome(entry: item, merged: false)
     }
@@ -416,7 +497,9 @@ final class PasteDatabase {
     }
 
     /// 历史条数上限（§50）：超出部分从最旧的非 Pin 条目删起，图片产物一并清理。
+    /// maxCount <= 0 直接返回（0 表示不限制）；防御调用方误传参清空全部历史。
     func enforceHistoryLimit(_ maxCount: Int) throws -> Int {
+        guard maxCount > 0 else { return 0 }
         let selection = """
         WHERE is_pinned = 0 AND board_id IS NULL AND id IN (
             SELECT id FROM clipboard_items WHERE is_pinned = 0 AND board_id IS NULL
@@ -435,18 +518,24 @@ final class PasteDatabase {
     }
 
     /// 清扫孤儿图片产物（§48）：数据库不再引用的 Images / Thumbnails 文件。
+    /// 两个目录的引用集合分开维护：原图与缩略图同名（同哈希）时互不清除。
     func sweepOrphanArtifacts() throws -> Int {
         let rows = try connection.query(
             "SELECT image_path, thumbnail_path FROM clipboard_items WHERE image_path IS NOT NULL OR thumbnail_path IS NOT NULL") { row in
-                (row.stringOrNil("image_path"), row.stringOrNil("thumbnail_path"))
+                (try row.stringOrNil("image_path"), try row.stringOrNil("thumbnail_path"))
             }
-        var referenced = Set<String>()
+        var referencedImages = Set<String>()
+        var referencedThumbnails = Set<String>()
         for (imagePath, thumbnailPath) in rows {
-            for path in [imagePath, thumbnailPath].compactMap({ $0 }) {
-                referenced.insert(URL(fileURLWithPath: path).lastPathComponent)
+            if let imagePath {
+                referencedImages.insert(URL(fileURLWithPath: imagePath).lastPathComponent)
+            }
+            if let thumbnailPath {
+                referencedThumbnails.insert(URL(fileURLWithPath: thumbnailPath).lastPathComponent)
             }
         }
-        return try imageStore.sweepOrphans(referencedFileNames: referenced)
+        return try imageStore.sweepOrphans(
+            referencedImageNames: referencedImages, referencedThumbnailNames: referencedThumbnails)
     }
 
     // MARK: - Pinboard 文件夹
@@ -460,10 +549,16 @@ final class PasteDatabase {
         return Pinboard(id: id, name: name, color: color, position: Int(maxPosition + 1))
     }
 
-    /// 删除文件夹：其中条目回到默认「剪贴板」（board_id 置空），条目本身不删除。
+    /// 删除文件夹：其余条目回到默认「剪贴板」（board_id 置空），条目本身不删除。
+    /// 已软删除（removed_from_history = 1）的条目移出文件夹后不再可见于任何视图，
+    /// 直接物理删除（与 setItemBoard(→nil) 语义一致），图片产物一并清理。
     /// 条目释放与文件夹删除同事务，失败整体回滚。
     func deleteBoard(id: Int64) throws {
+        var artifacts: [(String?, String?)] = []
         try connection.transaction {
+            artifacts = try fetchArtifacts(whereClause: "WHERE board_id = ?1 AND removed_from_history = 1", params: [.int(id)])
+            try connection.run(
+                "DELETE FROM clipboard_items WHERE board_id = ?1 AND removed_from_history = 1", [.int(id)])
             try connection.run(
                 "UPDATE clipboard_items SET board_id = NULL WHERE board_id = ?1", [.int(id)])
             let changed = try connection.run("DELETE FROM boards WHERE id = ?1", [.int(id)])
@@ -471,14 +566,15 @@ final class PasteDatabase {
                 throw PasteError.notFound(id)
             }
         }
+        artifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
     }
 
     /// 全部文件夹（按创建顺序）。
     func listBoards() throws -> [Pinboard] {
         try connection.query("SELECT id, name, color, position FROM boards ORDER BY position, id") { row in
             Pinboard(
-                id: row.int("id"), name: row.string("name"),
-                color: row.string("color"), position: Int(row.int("position")))
+                id: try row.int("id"), name: try row.string("name"),
+                color: try row.string("color"), position: Int(try row.int("position")))
         }
     }
 
@@ -627,31 +723,31 @@ final class PasteDatabase {
     private func fetchArtifacts(whereClause: String, params: [SQLValue]) throws -> [(String?, String?)] {
         try connection.query(
             "SELECT image_path, thumbnail_path FROM clipboard_items \(whereClause)", params) { row in
-                (row.stringOrNil("image_path"), row.stringOrNil("thumbnail_path"))
+                (try row.stringOrNil("image_path"), try row.stringOrNil("thumbnail_path"))
             }
     }
 
-    private static func makeEntry(_ row: SQLRow) -> ClipboardEntry {
+    private static func makeEntry(_ row: SQLRow) throws -> ClipboardEntry {
         ClipboardEntry(
-            id: row.int("id"),
-            itemType: ClipboardEntryType(databaseKey: row.string("type")),
-            createdAt: Date(timeIntervalSince1970: Double(row.int("created_at")) / 1000),
-            updatedAt: Date(timeIntervalSince1970: Double(row.int("updated_at")) / 1000),
-            title: row.stringOrNil("title"),
-            preview: row.stringOrNil("preview"),
-            textContent: row.stringOrNil("text_content"),
-            url: row.stringOrNil("url"),
-            filePath: row.stringOrNil("file_path"),
-            imagePath: row.stringOrNil("image_path"),
-            thumbnailPath: row.stringOrNil("thumbnail_path"),
-            sourceApp: row.stringOrNil("source_app"),
-            sourceAppName: row.stringOrNil("source_app_name"),
-            contentSize: row.int("content_size"),
-            uti: row.stringOrNil("uti"),
-            isPinned: row.bool("is_pinned"),
-            metadata: row.stringOrNil("metadata"),
-            removedFromHistory: row.bool("removed_from_history"),
-            titleIsCustom: row.bool("title_is_custom"))
+            id: try row.int("id"),
+            itemType: ClipboardEntryType(databaseKey: try row.string("type")),
+            createdAt: Date(timeIntervalSince1970: Double(try row.int("created_at")) / 1000),
+            updatedAt: Date(timeIntervalSince1970: Double(try row.int("updated_at")) / 1000),
+            title: try row.stringOrNil("title"),
+            preview: try row.stringOrNil("preview"),
+            textContent: try row.stringOrNil("text_content"),
+            url: try row.stringOrNil("url"),
+            filePath: try row.stringOrNil("file_path"),
+            imagePath: try row.stringOrNil("image_path"),
+            thumbnailPath: try row.stringOrNil("thumbnail_path"),
+            sourceApp: try row.stringOrNil("source_app"),
+            sourceAppName: try row.stringOrNil("source_app_name"),
+            contentSize: try row.int("content_size"),
+            uti: try row.stringOrNil("uti"),
+            isPinned: try row.bool("is_pinned"),
+            metadata: try row.stringOrNil("metadata"),
+            removedFromHistory: try row.bool("removed_from_history"),
+            titleIsCustom: try row.bool("title_is_custom"))
     }
 
     // MARK: - 私有：载荷解析（§16-§21，port of resolve_new_item）
@@ -673,16 +769,19 @@ final class PasteDatabase {
         if let source = entry.imageSourcePath {
             effective.itemType = .image
             let url = URL(fileURLWithPath: source)
-            let data: Data
+            // 分块流式哈希：不整读文件进内存（单图上限 50MB，重复捕获路径会反复执行）
+            let (hash, byteCount): (String, Int64)
             do {
-                data = try Data(contentsOf: url)
+                (hash, byteCount) = try Self.streamedSHA256(at: url)
+            } catch let error as PasteError {
+                throw error
             } catch {
                 throw PasteError.fileSystem(String(describing: error))
             }
             return ResolvedNewItem(
                 effective: effective,
-                contentHash: sha256Hex(data),
-                contentSize: Int64(data.count))
+                contentHash: hash,
+                contentSize: byteCount)
         }
 
         if (entry.itemType == .file || entry.itemType == .folder),
@@ -781,6 +880,25 @@ final class PasteDatabase {
     }
 
     // MARK: - 私有：metadata JSON 操作
+
+    /// 分块流式计算文件 SHA-256 与字节数；哈希结果与整读 sha256Hex 完全一致（dedup 依赖）。
+    private static func streamedSHA256(at url: URL) throws -> (hash: String, byteCount: Int64) {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            throw PasteError.fileSystem("cannot open image: \(url.path)")
+        }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        var total: Int64 = 0
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+            total += Int64(chunk.count)
+        }
+        let hash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return (hash, total)
+    }
 
     /// 在 metadata JSON 中写入（或覆盖）language 字段；原 metadata 非法时重建对象。
     private static func withLanguage(_ metadata: String?, language: String) -> String {

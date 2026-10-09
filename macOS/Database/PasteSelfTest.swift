@@ -6,8 +6,9 @@ import CryptoKit
 /// 原生数据层自测（-PasteSelfTest）：在临时库上运行关键断言后退出（退出码 0 / 1）。
 /// 覆盖原 Rust 测试套的关键路径：迁移、去重 touch、搜索（FTS / LIKE / 软删除过滤）、
 /// Pin、软删除与移出文件夹物理删除、编辑重分类与合并、文件夹 CRUD、
-/// 清理（上限 / 孤儿文件）、分类器、统计、图片转存。
-final class PasteSelfTest {
+/// 清理（上限 / 孤儿文件）、分类器、统计、图片转存、导入导出往返。
+/// 跨线程仅经由信号量串行（transferTests 等待后再读结果），@unchecked 成立。
+final class PasteSelfTest: @unchecked Sendable {
     private var failures: [String] = []
     private var checks = 0
 
@@ -24,6 +25,7 @@ final class PasteSelfTest {
             try cleanupTests()
             try imageTests()
             classifierTests()
+            try transferTests()
         } catch {
             failures.append("unexpected throw: \(String(describing: error))")
         }
@@ -82,10 +84,10 @@ final class PasteSelfTest {
         let database = try PasteDatabase(inMemoryForTesting: true)
 
         // 迁移到最新版本
-        expect(try database.schemaVersion() == pasteSchemaVersion, "schema reaches v4")
+        expect(try database.schemaVersion() == pasteSchemaVersion, "schema reaches latest")
 
         // 文本捕获：标题派生 + 分类 + 字节数
-        let created = try database.createItem(textEntry("UniFFI 边界测试条目\n第二行"))
+        let created = try database.createItem(textEntry("UniFFI 边界测试条目\n第二行")).entry
         expect(created.itemType == .text, "plain text type")
         expect(created.title == "UniFFI 边界测试条目", "title = first non-empty line")
         expect(created.contentSize == Int64("UniFFI 边界测试条目\n第二行".utf8.count), "content size in bytes")
@@ -93,7 +95,9 @@ final class PasteSelfTest {
         // 去重 touch：同内容只刷新时间，不新增行
         let firstUpdatedAt = created.updatedAt
         Thread.sleep(forTimeInterval: 0.01)
-        let touched = try database.createItem(created.toNewItem())
+        let touchedOutcome = try database.createItem(created.toNewItem())
+        expect(touchedOutcome.isNew == false, "dedup outcome reports merged")
+        let touched = touchedOutcome.entry
         expect(touched.id == created.id, "dedup keeps same id")
         expect(touched.updatedAt > firstUpdatedAt, "dedup refreshes updated_at")
         expect(try database.statistics().totalCount == 1, "dedup keeps single row")
@@ -108,23 +112,23 @@ final class PasteSelfTest {
         expect(try database.getPinnedItems(limit: 50, offset: 0).count == 1, "pinned listed")
 
         // URL 捕获：类型 / 标题域名 / url 规范化
-        let urlEntry = try database.createItem(textEntry("https://developer.apple.com/design/?x=1"))
+        let urlEntry = try database.createItem(textEntry("https://developer.apple.com/design/?x=1")).entry
         expect(urlEntry.itemType == .url, "URL classified")
         expect(urlEntry.title == "developer.apple.com", "URL title = host")
         expect(urlEntry.url == "https://developer.apple.com/design/?x=1", "URL normalized to url field")
 
         // JSON 捕获 → code + metadata.language
-        let jsonEntry = try database.createItem(textEntry(#"{"name": "Paste", "version": 1}"#))
+        let jsonEntry = try database.createItem(textEntry(#"{"name": "Paste", "version": 1}"#)).entry
         expect(jsonEntry.itemType == .code, "JSON classified as code")
         expect(jsonEntry.codeLanguage == "json", "JSON language metadata")
 
         // 普通句子不误判（曾因 "let " + "?" 误判为 Swift 的回归）
-        let prose = try database.createItem(textEntry("let me know if you need help"))
+        let prose = try database.createItem(textEntry("let me know if you need help")).entry
         expect(prose.itemType == .text, "prose stays text")
 
         // 软删除全流程（port of soft_remove_keeps_board_copy_and_purges_on_exit）
         let board = try database.createBoard(name: "工作", color: "#4F8EF7")
-        let favorited = try database.createItem(textEntry("收藏内容"))
+        let favorited = try database.createItem(textEntry("收藏内容")).entry
         try database.setItemBoard(id: favorited.id, boardId: board.id)
         try database.pinItem(id: favorited.id)
         expect(try database.removeItemFromHistory(id: favorited.id) == .keptInBoard, "soft remove outcome")
@@ -138,12 +142,12 @@ final class PasteSelfTest {
         expectThrows("purge on board exit", { try database.getItem(id: favorited.id) })
 
         // 未收藏条目从历史移除 = 物理删除
-        let plain = try database.createItem(textEntry("普通内容"))
+        let plain = try database.createItem(textEntry("普通内容")).entry
         expect(try database.removeItemFromHistory(id: plain.id) == .deleted, "unpinned removal deletes")
         expectThrows("deleted item not found", { try database.getItem(id: plain.id) })
 
         // 导入还原软删除状态
-        let restored = try database.createItem(textEntry("备份恢复的条目"))
+        let restored = try database.createItem(textEntry("备份恢复的条目")).entry
         try database.setItemBoard(id: restored.id, boardId: board.id)
         try database.setRemovedFromHistory(id: restored.id, removed: true)
         expect(!ids(try database.getItems(filter: nil, boardId: nil, limit: 50, offset: 0)).contains(restored.id), "restored flag hides from history")
@@ -153,7 +157,7 @@ final class PasteSelfTest {
         expectThrows("setRemoved on missing id", { try database.setRemovedFromHistory(id: 999, removed: true) })
 
         // 编辑：重分类 + 命名标题保留 + 可被新类型搜到
-        let edited = try database.createItem(textEntry("普通一句话"))
+        let edited = try database.createItem(textEntry("普通一句话")).entry
         try database.renameItem(id: edited.id, title: "我的链接")
         let outcome = try database.editTextItem(id: edited.id, newText: "https://unique-edit-target-9x.com")
         expect(!outcome.merged, "edit not merged")
@@ -163,14 +167,24 @@ final class PasteSelfTest {
         expect(try database.searchItems("unique-edit-target", filter: nil, boardId: nil, limit: 50, offset: 0).count == 1, "edited url searchable")
         expectThrows("edit rejects empty", { try database.editTextItem(id: edited.id, newText: "   ") })
 
-        // 编辑合并进已有重复（置顶随合并消失）
-        let keep = try database.createItem(textEntry("独特的内容"))
-        let willMerge = try database.createItem(textEntry("将被改成重复的草稿"))
+        // 编辑合并进已有重复（组织信息归并到保留行：Pin 不再随合并丢失）
+        let keep = try database.createItem(textEntry("独特的内容")).entry
+        let willMerge = try database.createItem(textEntry("将被改成重复的草稿")).entry
         try database.pinItem(id: willMerge.id)
         let mergedOutcome = try database.editTextItem(id: willMerge.id, newText: "独特的内容")
         expect(mergedOutcome.merged && mergedOutcome.entry.id == keep.id, "edit merges into duplicate")
         expectThrows("merged row deleted", { try database.getItem(id: willMerge.id) })
-        expect(!ids(try database.getPinnedItems(limit: 50, offset: 0)).contains(willMerge.id), "merged pin gone")
+        expect(mergedOutcome.entry.isPinned, "merge preserves pin from edited row")
+
+        // 重新复制软删除条目 → 恢复历史可见（此前 dedup touch 隐藏行，历史无反应）
+        let recopied = try database.createItem(textEntry("软删后重新复制")).entry
+        try database.setItemBoard(id: recopied.id, boardId: board.id)
+        _ = try database.removeItemFromHistory(id: recopied.id)
+        expect(!ids(try database.getItems(filter: nil, boardId: nil, limit: 50, offset: 0)).contains(recopied.id),
+               "soft-removed hidden before recopy")
+        let again = try database.createItem(textEntry("软删后重新复制")).entry
+        expect(again.id == recopied.id, "recopy hits dedup row")
+        expect(!again.removedFromHistory, "recopy restores history visibility")
 
         // 文件夹：重命名 / 删除释放条目
         try database.renameBoard(id: board.id, name: "客户项目")
@@ -213,10 +227,10 @@ final class PasteSelfTest {
         // 历史上限：Pin / 收藏豁免，最旧的先删
         var ids: [Int64] = []
         for index in 0..<5 {
-            let entry = try database.createItem(textEntry("上限测试 \(index)"))
+            let entry = try database.createItem(textEntry("上限测试 \(index)")).entry
             ids.append(entry.id)
         }
-        let pinned = try database.createItem(textEntry("上限置顶豁免"))
+        let pinned = try database.createItem(textEntry("上限置顶豁免")).entry
         try database.pinItem(id: pinned.id)
         let trimmed = try database.enforceHistoryLimit(3)
         let remaining = try database.getItems(filter: nil, boardId: nil, limit: 50, offset: 0)
@@ -227,6 +241,12 @@ final class PasteSelfTest {
         expect(remaining.count == 4, "pinned exempt from limit")
         expect(!remaining.contains { $0.id == ids[0] }, "oldest trimmed first")
         expect(remaining.contains { $0.id == pinned.id }, "pinned survives limit")
+
+        // maxCount <= 0 必须是 no-op（DB 层设防，防调用方误传清空全部历史）
+        expect(try database.enforceHistoryLimit(0) == 0, "limit 0 is no-op")
+        expect(try database.enforceHistoryLimit(-5) == 0, "negative limit is no-op")
+        expect(try database.getItems(filter: nil, boardId: nil, limit: 50, offset: 0).count == 4,
+               "limit 0 keeps history intact")
 
         // 孤儿清扫：删除引用后，扫描库内已无引用的文件
         let orphans = try database.sweepOrphanArtifacts()
@@ -250,13 +270,15 @@ final class PasteSelfTest {
         imageEntry.itemType = .image
         imageEntry.imageSourcePath = source.path
         imageEntry.uti = "public.png"
-        let stored = try database.createItem(imageEntry)
+        let storedOutcome = try database.createItem(imageEntry)
+        let stored = storedOutcome.entry
+        expect(storedOutcome.isNew, "image capture inserts new row")
         expect(stored.itemType == .image, "image type forced")
         expect(stored.imagePath != nil && FileManager.default.fileExists(atPath: stored.imagePath!), "image stored")
         expect(stored.thumbnailPath != nil && FileManager.default.fileExists(atPath: stored.thumbnailPath!), "thumbnail generated")
 
         // 同内容再捕获：哈希命中已有条目，不重复转存
-        let touched = try database.createItem(imageEntry)
+        let touched = try database.createItem(imageEntry).entry
         expect(touched.id == stored.id && touched.imagePath == stored.imagePath, "image dedup idempotent")
 
         // 无法解码的“图片”：原图照存、无缩略图
@@ -265,7 +287,7 @@ final class PasteSelfTest {
         var badEntry = NewClipboardEntry()
         badEntry.itemType = .image
         badEntry.imageSourcePath = garbage.path
-        let bad = try database.createItem(badEntry)
+        let bad = try database.createItem(badEntry).entry
         expect(FileManager.default.fileExists(atPath: bad.imagePath ?? ""), "undecodable image still stored")
         expect(bad.thumbnailPath == nil, "undecodable image has no thumbnail")
 
@@ -278,6 +300,69 @@ final class PasteSelfTest {
     }
 
     // MARK: - 分类器
+
+    /// 导入导出往返（async；经独立线程桥接，主线程用信号量等待）。
+    private func transferTests() throws {
+        let semaphore = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            Task {
+                do {
+                    try await self.runTransferAssertions()
+                } catch {
+                    self.failures.append("transfer tests threw: \(String(describing: error))")
+                }
+                semaphore.signal()
+            }
+        }
+        thread.name = "paste-selftest-transfer"
+        thread.start()
+        if semaphore.wait(timeout: .now() + 30) != .success {
+            failures.append("transfer tests timed out")
+        }
+    }
+
+    private func runTransferAssertions() async throws {
+        let source = try ClipboardRepository(inMemoryForTesting: true)
+        _ = try await source.create(textEntry("历史区内容"))
+        let board = try await source.createBoard(name: "迁移夹", color: "#4F8EF7")
+        let boardItem = try await source.create(textEntry("文件夹内容"))
+        try await source.setItemBoard(id: boardItem.entry.id, boardId: board.id)
+
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("paste-selftest-\(UUID().uuidString).pasteexport")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let exportSummary = try await LibraryTransfer.exportAll(to: fileURL, repository: source)
+        if exportSummary.itemCount != 2 || exportSummary.boardCount != 1 {
+            print("  diag: export itemCount=\(exportSummary.itemCount) boardCount=\(exportSummary.boardCount) skipped=\(exportSummary.skippedBrokenCount)")
+        }
+        expect(exportSummary.itemCount == 2, "export includes history and board items")
+        expect(exportSummary.boardCount == 1, "export board count")
+
+        let target = try ClipboardRepository(inMemoryForTesting: true)
+        let importSummary = try await LibraryTransfer.importDocument(from: fileURL, repository: target)
+        expect(importSummary.itemCount == 2 && importSummary.mergedCount == 0, "import round-trip counts")
+        expect(importSummary.boardCount == 1, "import processes board")
+        expect(try await target.search("历史区内容", boardId: nil, limit: 10, offset: 0).count == 1,
+               "history item round-trips")
+        let targetBoards = try await target.boards()
+        expect(targetBoards.first?.name == "迁移夹", "board round-trips")
+        expect(try await target.items(boardId: targetBoards[0].id, limit: 10, offset: 0).count == 1,
+               "board item round-trips")
+
+        // 过新版本拒绝导入（版本门）
+        let futureURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("paste-selftest-future-\(UUID().uuidString).pasteexport")
+        defer { try? FileManager.default.removeItem(at: futureURL) }
+        try Data("{\"format\":\"paste-export\",\"version\":99,\"exportedAt\":\"2026-01-01T00:00:00Z\",\"boards\":[]}".utf8)
+            .write(to: futureURL)
+        do {
+            _ = try await LibraryTransfer.importDocument(from: futureURL, repository: target)
+            failures.append("future version: expected throw, got success")
+            checks += 1
+        } catch {
+            checks += 1
+        }
+    }
 
     private func classifierTests() {
         expect(isStandaloneURL("https://apple.com"), "URL: plain https")
@@ -292,7 +377,9 @@ final class PasteSelfTest {
         expect(detectCodeLanguage(#"{"a": [1, 2, 3]}"#) == "json", "JSON language")
         expect(detectCodeLanguage(#"{"a": "#) == nil, "incomplete JSON not code")
         expect(classifyText("#!/bin/bash\necho hi") == .code, "shebang is code")
-        expect(detectCodeLanguage("#!/usr/bin/env python3") == "shell", "shebang language shell")
+        expect(detectCodeLanguage("#!/usr/bin/env python3") == "python", "shebang python3")
+        expect(detectCodeLanguage("#!/bin/zsh") == "shell", "shebang zsh shell")
+        expect(detectCodeLanguage("#!env -S bun run dev") == "javascript", "shebang env -S bun")
 
         let swiftCode = "struct Foo {\n    func bar() -> Int {\n        let x = 1\n        return x\n    }\n}"
         expect(classifyText(swiftCode) == .code && detectCodeLanguage(swiftCode) == "swift", "swift detected")
@@ -300,6 +387,8 @@ final class PasteSelfTest {
         expect(classifyText(pythonCode) == .code && detectCodeLanguage(pythonCode) == "python", "python detected")
         let sql = "SELECT id, name FROM users WHERE age > 18 ORDER BY name"
         expect(classifyText(sql) == .code && detectCodeLanguage(sql) == "sql", "sql detected")
+        // 散文误判回归：select/from 都是英语常用词，两个词不再足以判成 SQL
+        expect(classifyText("Please select from the menu") == .text, "english prose stays text")
         expect(classifyText("今天天气不错，适合出去走走。") == .text, "chinese prose stays text")
         expect(classifyText("   ") == .text, "empty stays text")
     }
