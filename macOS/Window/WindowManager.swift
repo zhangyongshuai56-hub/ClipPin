@@ -22,6 +22,14 @@ final class WindowManager: NSObject, NSWindowDelegate {
     private var resignObserver: NSObjectProtocol?
     /// 面板可见期间的全局点击监听（非激活面板不会产生 resignActive，点击外部关闭由此兜底）。
     private var clickOutsideObserver: Any?
+    /// 显隐动画代数：每次呼出/隐藏自增。被打断的动画回调检查代数后再收尾，
+    /// 否则快速连按 ⌘⇧V 时，上一次隐藏的完成回调会把刚显示的面板 orderOut 吞掉。
+    private var transitionGeneration = 0
+
+    /// 「点击外部 / 失活关闭」的防误关宽限期：面板拿到过键盘焦点后，
+    /// 点击外部是明确意图，短宽限即可（响应优先）；焦点从未落位
+    /// （系统拒绝激活）时保留长宽限，避免呼出瞬间被误关。
+    private var dismissGraceInterval: TimeInterval { panelHadKeyFocus ? 0.3 : 1.5 }
 
     /// 显示剪贴板面板（需求 §1、§7）：出现在鼠标所在屏幕底部居中，聚焦搜索框。
     func showClipboardWindow(focusSearch: Bool = true) {
@@ -34,26 +42,25 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
         let savedSize = Self.loadPanelSize()
         let window = clipboardWindow ?? makeClipboardWindow(repository: repository, contentSize: savedSize)
-        positionAtBottomCenter(window)
 
         shownAt = Date()
         panelHadKeyFocus = false
-        // §64：呼出淡入（100~250ms 内）
-        window.alphaValue = 0
+        transitionGeneration += 1
+        // §64：呼出「到场」——自底部锚点轻微上浮 + 淡入；从当前呈现值出发，
+        // 打断进行中的隐藏时不会跳变；已完整可见时（菜单栏重复呼出）不重播
+        animateIn(window)
         // .nonactivatingPanel：makeKey 不依赖应用激活——前台应用正在输入、
         // 协作式激活被系统拒绝时，面板照样拿到键盘焦点（Spotlight 模型）
         window.makeKeyAndOrderFront(nil)
         window.makeKey()
         // best-effort 激活：成功时失活关闭等旧行为保持；失败不影响面板可用
         NSApp.activate(ignoringOtherApps: true)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            window.animator().alphaValue = 1
-        }
-        // makeKey 可能被系统延迟（协作式激活期间），重试直至面板真正拿到 key
+        // makeKey 可能被系统延迟（协作式激活期间），重试直至面板真正拿到 key；
+        // 期间面板又被隐藏（代数变化）则放弃重试
+        let generation = transitionGeneration
         for delay in [0.1, 0.35] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard generation == self.transitionGeneration else { return }
                 if !window.isKeyWindow {
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
@@ -89,19 +96,51 @@ final class WindowManager: NSObject, NSWindowDelegate {
         }
     }
 
-    /// 隐藏面板（Esc / 点击外部 / Quick Paste，§28、需求 §6）。淡出后保留状态。
+    /// 隐藏面板（Esc / 点击外部 / Quick Paste，§28、需求 §6）。
+    /// 与呼出互为镜像（同路径往返，空间一致）；从当前呈现值出发可被随时打断，
+    /// 完成回调检查动画代数：被打断的隐藏不再 orderOut 面板。
     func hideClipboardWindow() {
         guard let window = clipboardWindow, window.isVisible else { return }
+        transitionGeneration += 1
+        let generation = transitionGeneration
+        let frame = window.frame
+        let exitFrame = CGRect(
+            origin: CGPoint(x: frame.origin.x, y: frame.origin.y - 10),
+            size: frame.size
+        )
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
+            window.animator().setFrame(exitFrame, display: true)
         }, completionHandler: {
             MainActor.assumeIsolated {
+                guard generation == self.transitionGeneration, self.clipboardWindow === window else { return }
                 window.orderOut(nil)
                 window.alphaValue = 1
             }
         })
+    }
+
+    /// 呼出动画：淡入 + 自底部目标位置下方 10pt 上浮到场。
+    /// 起点取当前呈现值（打断隐藏时从中途继续），reduce motion 退化为快速淡入。
+    private func animateIn(_ window: NSPanel) {
+        let size = window.frame.size
+        let targetOrigin = Self.bottomCenterOrigin(for: window)
+        let targetFrame = CGRect(origin: targetOrigin, size: size)
+        if !window.isVisible {
+            // 隐藏收尾时 alpha 已复位为 1，重新呼出前先置于起点
+            window.setFrame(CGRect(origin: CGPoint(x: targetOrigin.x, y: targetOrigin.y - 10), size: size), display: false)
+            window.alphaValue = 0
+        }
+        guard window.alphaValue < 0.999 || window.frame != targetFrame else { return }
+        let reducedMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reducedMotion ? 0.08 : 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+            window.animator().setFrame(targetFrame, display: true)
+        }
     }
 
     /// 外观设置变化时同步到已创建窗口的标题栏。
@@ -155,8 +194,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let window = self.clipboardWindow, window.isVisible else { return }
-                // 宽限期：呼出后焦点可能被前一个应用短暂抢回，1.5s 内不失活关闭
-                guard Date().timeIntervalSince(self.shownAt) > 1.5 else { return }
+                // 宽限期：呼出后焦点可能被前一个应用短暂抢回，期间不失活关闭
+                guard Date().timeIntervalSince(self.shownAt) > self.dismissGraceInterval else { return }
                 // Quick Paste 进行中不关（激活目标应用会触发失活）
                 guard !PasteService.shared.isBusy else { return }
                 // 呼出时未获得焦点（如系统拒绝后台激活）→ 失活不关，面板仍可点击使用
@@ -177,7 +216,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let window = self.clipboardWindow, window.isVisible else { return }
-                guard Date().timeIntervalSince(self.shownAt) > 1.5 else { return }
+                guard Date().timeIntervalSince(self.shownAt) > self.dismissGraceInterval else { return }
                 guard !PasteService.shared.isBusy else { return }
                 self.hideClipboardWindow()
             }
@@ -186,23 +225,20 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
     // MARK: - 定位与尺寸
 
-    /// 需求 §1/§5：面板出现在鼠标所在屏幕底部居中（无法确定时回退主屏）。
+    /// 需求 §1/§5：面板目标位置为鼠标所在屏幕底部居中（无法确定时回退当前帧）。
     /// visibleFrame 已扣除菜单栏 / Dock / 刘海。
-    private func positionAtBottomCenter(_ window: NSWindow) {
+    private static func bottomCenterOrigin(for window: NSPanel) -> CGPoint {
         let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouseLocation) } ?? NSScreen.main
-        guard let screen else {
-            window.center()
-            return
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main else {
+            return window.frame.origin
         }
         let visibleFrame = screen.visibleFrame
         let size = window.frame.size
         let bottomMargin: CGFloat = 12
-        let origin = CGPoint(
+        return CGPoint(
             x: visibleFrame.midX - size.width / 2,
             y: visibleFrame.minY + bottomMargin
         )
-        window.setFrameOrigin(origin)
     }
 
     static func loadPanelSize() -> NSSize {

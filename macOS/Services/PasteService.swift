@@ -84,9 +84,11 @@ final class PasteService {
 
     // MARK: - 粘贴
 
-    /// 隐藏窗口 → 激活之前的前台应用 → 合成 ⌘V。
+    /// 激活之前的前台应用 → 合成 ⌘V。
+    /// 面板保持可见以展示反馈（非激活面板不持键盘焦点，不影响目标应用接收按键），
+    /// 由调用方在反馈展示完毕后再收面板。
     /// 返回 false 表示未能完成（原因已记录）。
-    func pasteToPreviousApp(hideWindow: () -> Void) async -> Bool {
+    func pasteToPreviousApp() async -> Bool {
         guard let previous = previousApp else {
             logger.error("quick paste aborted: no previous app recorded")
             return false
@@ -95,7 +97,6 @@ final class PasteService {
             logger.error("quick paste aborted: target is self")
             return false
         }
-        hideWindow()
         // 由当前应用发起协作式激活，把焦点让渡给粘贴目标
         let activated = previous.activate(from: .current)
         if !activated {
@@ -124,16 +125,17 @@ final class PasteService {
 
     // MARK: - 完整编排
 
-    /// 完整 Quick Paste 编排（§37）：快照原剪贴板 → 写板 → 隐藏窗口 → 激活目标 →
+    /// 完整 Quick Paste 编排（§37）：快照原剪贴板 → 写板 → 激活目标 →
     /// ⌘V → 延时恢复。内容如何写板（`write`）属于调用方的领域知识；
-    /// 时序、快照恢复与 isBusy 状态全部在此收口。
-    func runQuickPaste(write: () -> Bool, hideWindow: () -> Void) async -> QuickPasteOutcome {
+    /// 时序、快照恢复与 isBusy 状态全部在此收口。面板的隐藏由调用方
+    /// 在成功反馈展示后自行执行。
+    func runQuickPaste(write: () -> Bool) async -> QuickPasteOutcome {
         guard isAccessibilityTrusted else { return .accessibilityDenied }
         let snapshot = captureCurrentContents()
         guard write() else { return .writeFailed }
         isBusy = true
         defer { isBusy = false }
-        let pasted = await pasteToPreviousApp(hideWindow: hideWindow)
+        let pasted = await pasteToPreviousApp()
         guard pasted else {
             // 失败也必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
             restore(snapshot)

@@ -1,3 +1,0 @@
-# UniFFI Swift 绑定配置
-[bindings.swift]
-module_name = "PasteCore"

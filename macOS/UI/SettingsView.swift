@@ -281,7 +281,7 @@ private struct ClipboardSettingsView: View {
                     Text(DefaultPasteAction.clipboard.title).tag(DefaultPasteAction.clipboard.rawValue)
                 }
                 .pickerStyle(.radioGroup)
-                Text(DefaultPasteAction(rawValue: defaultActionRaw)?.detail ?? "")
+                Text("Enter 与双击卡片都按此操作执行；⌘↩ 始终粘贴到当前活动应用。" + (DefaultPasteAction(rawValue: defaultActionRaw)?.detail ?? ""))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Toggle("始终以纯文本粘贴", isOn: $alwaysPlainText)
@@ -363,6 +363,17 @@ private struct ClipboardSettingsView: View {
             Button("好", role: .cancel) {}
         } message: {
             Text(cleanupSummary ?? "")
+        }
+        .alert(
+            "无法设置快捷键",
+            isPresented: Binding(
+                get: { shortcutErrorMessage != nil },
+                set: { if !$0 { shortcutErrorMessage = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(shortcutErrorMessage ?? "该组合键已被其他应用占用，请换一个组合再试。")
         }
     }
 

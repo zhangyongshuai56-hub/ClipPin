@@ -9,12 +9,26 @@ export SRCROOT
 
 export PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# 签名：优先使用本机已安装的 "AidoPaste Dev" 证书（Scripts/create-signing-cert.sh 安装）。
+# 固定证书让 TCC（辅助功能等权限）按证书匹配授权，重新构建不再掉权限；
+# 未安装证书时回退 ad-hoc（权限需每次重建后重授）。
+# 显式指定：SIGN_IDENTITY="AidoPaste Dev" Scripts/make-dmg.sh
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q '"AidoPaste Dev"'; then
+    SIGN_IDENTITY="AidoPaste Dev"
+  else
+    SIGN_IDENTITY="-"
+  fi
+fi
+
 # 从工程读取版本号
 VERSION=$(grep -m1 'MARKETING_VERSION' "$SRCROOT/Paste.xcodeproj/project.pbxproj" | sed 's/.*= \(.*\);.*/\1/')
 
 xcodebuild -project "$SRCROOT/Paste.xcodeproj" \
   -scheme Paste -configuration Release \
-  -derivedDataPath "$SRCROOT/.build/DerivedData" build
+  -derivedDataPath "$SRCROOT/.build/DerivedData" \
+  CODE_SIGN_IDENTITY="$SIGN_IDENTITY" DEVELOPMENT_TEAM="" \
+  build
 
 APP="$SRCROOT/.build/DerivedData/Build/Products/Release/Paste.app"
 STAGE=$(mktemp -d)

@@ -3,22 +3,37 @@ import ImageIO
 import SwiftUI
 
 /// 面板卡片（需求 §2、§11）：内容预览 + 类型/来源 + 时间；选中态显示「↩ 粘贴」角标。
+/// 单击选中、双击执行「默认操作」（与 Enter 共用设置）——点击检测收口在按下手势的 onEnded 内：
+/// 不能再依赖父视图的 onTapGesture，子视图的 DragGesture(minimumDistance: 0)
+/// 会在 mouse-down 完成识别并使父视图 tap 手势失效（SwiftUI 手势仲裁），双击由此失灵。
 struct ClipboardCard: View {
     let entry: ClipboardEntry
     let isSelected: Bool
+    var onSelect: () -> Void = {}
+    var onDoubleAction: () -> Void = {}
     @State private var isHovered = false
+    /// 按下状态：反馈发生在按下的瞬间，而不是松开时。
+    @State private var isPressed = false
+    /// 本次按压的起始时刻，用于排除长按。
+    @State private var pressStartDate = Date.distantPast
+    /// 上一次单击时刻，用于双击判定（间隔取系统双击阈值）。
+    @State private var lastTapDate: Date?
+
+    /// 位移超过该值按拖拽处理（取消点击）；按住超过该时长不算点击。
+    private static let clickTranslationLimit: CGFloat = 8
+    private static let clickDurationLimit: TimeInterval = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 5) {
                 Image(systemName: entry.itemType.symbolName)
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(entry.itemType.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 Text(entry.updatedAt.shelfRelativeTime)
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -29,16 +44,17 @@ struct ClipboardCard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             Spacer(minLength: 0)
             HStack(spacing: 4) {
+                if entry.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
                 Spacer(minLength: 0)
                 if let source = entry.sourceAppName {
                     Text(source)
-                        .font(.system(size: 10))
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
-                } else if entry.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.orange)
                 }
             }
         }
@@ -49,17 +65,56 @@ struct ClipboardCard: View {
                 .fill(
                     isSelected
                         ? Color.accentColor.opacity(0.10)
-                        : (isHovered ? Color.primary.opacity(0.055) : Color.primary.opacity(0.035))
+                        : (isPressed
+                            ? Color.primary.opacity(0.085)
+                            : (isHovered ? Color.primary.opacity(0.055) : Color.primary.opacity(0.035)))
                 )
         }
         .overlay {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
         }
+        .scaleEffect(isPressed ? 0.97 : 1)
+        .animation(.easeOut(duration: 0.1), value: isPressed)
         .onHover { isHovered = $0 }
+        // minimumDistance 0：mouse-down 即触发，按下瞬间就有反馈；
+        // 松开时位移/时长达标才算点击，按住拖走等于取消
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if !isPressed { pressStartDate = value.time }
+                    isPressed = hypot(value.translation.width, value.translation.height) < Self.clickTranslationLimit
+                }
+                .onEnded { value in
+                    isPressed = false
+                    guard hypot(value.translation.width, value.translation.height) < Self.clickTranslationLimit,
+                          value.time.timeIntervalSince(pressStartDate) < Self.clickDurationLimit
+                    else { return }
+                    let now = Date()
+                    if let last = lastTapDate, now.timeIntervalSince(last) <= NSEvent.doubleClickInterval {
+                        lastTapDate = nil
+                        onDoubleAction()
+                    } else {
+                        lastTapDate = now
+                        onSelect()
+                    }
+                }
+        )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.itemType.title)，\(entry.preview ?? entry.title ?? "")")
+        .accessibilityLabel(accessibilitySummary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: PasteSettings.defaultAction == .activeApp ? "粘贴" : "复制") { onDoubleAction() }
+    }
+
+    /// 朗读内容 = 类型 + 置顶 + 时间 + 来源 + 内容预览（缺一不可，读屏用户没有"扫一眼"）。
+    private var accessibilitySummary: String {
+        var parts: [String] = [entry.itemType.title]
+        if entry.isPinned { parts.append("已置顶") }
+        parts.append(entry.updatedAt.shelfRelativeTime)
+        if let source = entry.sourceAppName { parts.append("来源\(source)") }
+        parts.append(entry.preview ?? entry.title ?? "")
+        return parts.joined(separator: "，")
     }
 
     // MARK: - 内容预览（需求 §2 卡片形态）
@@ -78,7 +133,7 @@ struct ClipboardCard: View {
                     .fontWeight(.medium)
                     .lineLimit(2)
                 Text(entry.url ?? "")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -88,12 +143,12 @@ struct ClipboardCard: View {
                     .fontWeight(.medium)
                     .lineLimit(1)
                 Text(entry.filePath ?? "")
-                    .font(.system(size: 10.5))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if entry.contentSize > 0 {
                     Text(ByteCountFormatter.string(fromByteCount: entry.contentSize, countStyle: .file))
-                        .font(.system(size: 10.5))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }

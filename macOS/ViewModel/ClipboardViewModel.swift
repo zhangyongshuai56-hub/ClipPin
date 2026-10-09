@@ -13,7 +13,20 @@ enum OperationFeedback: Equatable {
     case copied
     /// 通用成功提示（命名、编辑、软删除等）。
     case message(String)
+    /// 可撤销的操作提示（删除）：toast 上带「撤销」按钮。
+    case undoable(String)
     case failed(String)
+
+    /// VoiceOver 播报文本（视觉 toast 对读屏用户不可感知）。
+    var announcementText: String? {
+        switch self {
+        case .idle: nil
+        case .pasting: "正在粘贴"
+        case .pasted(let app): "已粘贴到\(app)"
+        case .copied: "已复制到剪贴板"
+        case .message(let text), .undoable(let text), .failed(let text): text
+        }
+    }
 }
 
 /// 键盘左右导航方向（单行卡片流）。
@@ -50,6 +63,8 @@ final class ClipboardViewModel {
     var selectedBoardID: Int64? {
         didSet {
             guard oldValue != selectedBoardID else { return }
+            // 视图语义切换后，待删条目的撤销（按原索引放回）不再成立：立即提交
+            flushPendingDeletes()
             Task { await load(reset: true) }
         }
     }
@@ -122,7 +137,7 @@ final class ClipboardViewModel {
 
         let offset = reset ? 0 : entries.count
         do {
-            let page: [ClipboardEntry]
+            var page: [ClipboardEntry]
             if isSearchActive {
                 page = try await repository.search(
                     searchText,
@@ -139,12 +154,18 @@ final class ClipboardViewModel {
             }
             // 过期的加载（期间用户又输入了新词 / 切换了文件夹）直接丢弃
             guard generation == loadGeneration else { return }
+            canLoadMore = page.count == pageSize
+            // 待提交删除的条目在仓储里还没删，过滤掉，
+            // 否则监听器触发的刷新会把它提前「复活」
+            if !pendingDeletes.isEmpty {
+                let ids = Set(pendingDeletes.map(\.entry.id))
+                page = page.filter { !ids.contains($0.id) }
+            }
             if reset {
                 entries = page
             } else {
                 entries += page
             }
-            canLoadMore = page.count == pageSize
             fixSelection()
         } catch {
             guard generation == loadGeneration else { return }
@@ -194,6 +215,11 @@ final class ClipboardViewModel {
 
     func requestSearchFocus() {
         searchFocusRequest += 1
+    }
+
+    /// Quick Paste 的目标应用名（图例条「↩ 粘贴到 Safari」用）。
+    var pasteTargetHint: String? {
+        pasteService.previousAppName
     }
 
     // MARK: - Pinboard
@@ -249,7 +275,7 @@ final class ClipboardViewModel {
 
     // MARK: - 动作（需求 §9/§10/§16 两操作严格分离；§17 默认操作可配置）
 
-    /// Enter / 双击执行的默认操作。
+    /// Enter / 双击执行的默认操作（共用「默认操作」设置）。
     func performDefaultAction(_ entry: ClipboardEntry) async {
         switch PasteSettings.defaultAction {
         case .activeApp:
@@ -269,15 +295,18 @@ final class ClipboardViewModel {
         }
         showFeedback(.pasting, autoClearAfter: nil)
         let outcome = await pasteService.runQuickPaste(
-            write: { writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) },
-            hideWindow: { WindowManager.shared.hideClipboardWindow() }
+            write: { writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) }
         )
         switch outcome {
         case .success(let targetName):
-            showFeedback(.pasted(targetName ?? "当前应用"), autoClearAfter: .seconds(1))
-            // 让目标应用完成粘贴后再收面板
-            try? await Task.sleep(for: .milliseconds(900))
+            // 成功 toast 画在本面板上，面板必须保持可见直到展示完毕
+            // （先收面板反馈就没人看得见了）；期间用户有新操作则不再代收面板
+            let pasted = OperationFeedback.pasted(targetName ?? "当前应用")
+            showFeedback(pasted, autoClearAfter: nil)
+            try? await Task.sleep(for: .milliseconds(1200))
+            guard feedback == pasted else { return }
             WindowManager.shared.hideClipboardWindow()
+            feedback = .idle
         case .accessibilityDenied:
             showAccessibilityPrompt = true
         case .writeFailed:
@@ -288,9 +317,11 @@ final class ClipboardViewModel {
         }
     }
 
-    /// 操作 B：复制到系统剪贴板（需求 §10）。不需要 Accessibility，不执行 ⌘V。
+    /// 操作 B：复制到系统剪贴板（需求 §10；双击同样走这里）。
+    /// 不需要 Accessibility，不执行 ⌘V。「始终以纯文本」是粘贴设置，
+    /// 不约束复制——否则开启后复制图片会误报“暂不支持复制”。
     func copyToClipboard(_ entry: ClipboardEntry) {
-        guard writeToPasteboard(entry, forcePlainText: PasteSettings.alwaysPlainText) else { return }
+        guard writeToPasteboard(entry, forcePlainText: false) else { return }
         showFeedback(.copied, autoClearAfter: .seconds(1.5))
     }
 
@@ -362,23 +393,156 @@ final class ClipboardViewModel {
         }
     }
 
-    /// 删除条目（需求：删除保留收藏）。
-    /// 「剪贴板」视图：未收藏条目物理删除，已收藏条目软删除（历史移除、文件夹保留）；
-    /// 文件夹视图：物理删除。
-    func delete(_ entry: ClipboardEntry) async {
-        do {
-            if selectedBoardID != nil {
-                try await repository.delete(id: entry.id)
-            } else {
-                let outcome = try await repository.removeFromHistory(id: entry.id)
-                if outcome == .keptInBoard {
-                    showFeedback(.message("已从剪贴板移除 · 文件夹收藏已保留"), autoClearAfter: .seconds(2.5))
+    /// 待提交的删除：界面已移除，仓储删除延迟执行，等待可能的「撤销」。
+    /// 多次删除累积在同一窗口（滚动 4 秒），撤销一次全部恢复——
+    /// 不能因新删除而提前提交旧删除（否则连续 ⌦ 只能撤销最后一条）。
+    private struct PendingDelete {
+        let entry: ClipboardEntry
+        /// 在删除前列表中的位置，撤销时放回原位。
+        let index: Int
+        let run: () async -> Void
+    }
+
+    private var pendingDeletes: [PendingDelete] = []
+    private var pendingDeleteTask: Task<Void, Never>?
+    /// 待提交的文件夹删除（同一撤销模式；与条目删除互斥挂起）。
+    private var pendingBoardDelete: Pinboard?
+    private var boardDeleteTask: Task<Void, Never>?
+
+    /// 删除条目（需求：删除保留收藏）。界面立即移除，真正的删除延迟 4 秒提交，
+    /// 期间 toast 上可「撤销」——宽恕（易撤销）优于确认框。
+    /// 「剪贴板」视图移除收藏条目 = 软删除（历史移除、文件夹保留）；
+    /// 文件夹视图内 = 物理删除。
+    func delete(_ entry: ClipboardEntry) {
+        flushPendingBoardDelete()
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        entries.remove(at: index)
+        // 选中落到同位置的下一张：连续 ⌦ 可逐张向后删
+        selectionID = entries.isEmpty ? nil : entries[min(index, entries.count - 1)].id
+        let boardView = selectedBoardID != nil
+        let id = entry.id
+        pendingDeletes.append(PendingDelete(entry: entry, index: index) { [weak self] in
+            guard let self else { return }
+            do {
+                if boardView {
+                    try await self.repository.delete(id: id)
+                } else {
+                    _ = try await self.repository.removeFromHistory(id: id)
                 }
+            } catch {
+                self.setError(error)
+                await self.refresh()
             }
-            entries.removeAll { $0.id == entry.id }
-            fixSelection()
-        } catch {
-            setError(error)
+        })
+        restartPendingDeleteTimer()
+        showUndoFeedback()
+    }
+
+    /// toast「撤销」入口：同一时刻至多一种待撤销操作。
+    func undoPendingAction() {
+        if pendingBoardDelete != nil {
+            undoPendingBoardDelete()
+        } else {
+            undoPendingDeletes()
+        }
+    }
+
+    /// 撤销窗口内的全部待删条目：真正的删除尚未发生，按原位放回即可。
+    private func undoPendingDeletes() {
+        guard !pendingDeletes.isEmpty else { return }
+        pendingDeleteTask?.cancel()
+        pendingDeleteTask = nil
+        let mostRecent = pendingDeletes.last
+        let restores = pendingDeletes.sorted { $0.index < $1.index }
+        pendingDeletes.removeAll()
+        for pending in restores {
+            let index = min(pending.index, entries.count)
+            entries.insert(pending.entry, at: index)
+        }
+        if let mostRecent {
+            selectionID = entries.first(where: { $0.id == mostRecent.entry.id })?.id
+        }
+        feedback = .idle
+    }
+
+    /// 提交全部待删条目（撤销窗口结束）。
+    private func flushPendingDeletes() {
+        guard !pendingDeletes.isEmpty else { return }
+        let toCommit = pendingDeletes
+        pendingDeletes.removeAll()
+        pendingDeleteTask?.cancel()
+        pendingDeleteTask = nil
+        if case .undoable = feedback { feedback = .idle }
+        Task {
+            for pending in toCommit { await pending.run() }
+        }
+    }
+
+    private func restartPendingDeleteTimer() {
+        pendingDeleteTask?.cancel()
+        pendingDeleteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.flushPendingDeletes()
+        }
+    }
+
+    private func showUndoFeedback() {
+        let noun = selectedBoardID != nil ? "已删除" : "已从剪贴板移除"
+        let text = pendingDeletes.count > 1 ? "\(noun) \(pendingDeletes.count) 条" : noun
+        showFeedback(.undoable(text), autoClearAfter: nil)
+    }
+
+    // MARK: - 文件夹删除（可撤销）
+
+    /// 删除文件夹：chip 立即移除，真正的删除延迟 4 秒提交，期间可撤销。
+    /// 提交前的窗口期内文件夹与成员都原封未动，撤销即零成本复原。
+    func deleteBoard(_ board: Pinboard) {
+        flushPendingDeletes()
+        boards.removeAll { $0.id == board.id }
+        if selectedBoardID == board.id {
+            // didSet 负责切回「剪贴板」并重载列表
+            selectedBoardID = nil
+        }
+        pendingBoardDelete = board
+        restartBoardDeleteTimer()
+        showFeedback(.undoable("已删除文件夹「\(board.name)」"), autoClearAfter: nil)
+    }
+
+    private func undoPendingBoardDelete() {
+        guard let board = pendingBoardDelete else { return }
+        boardDeleteTask?.cancel()
+        boardDeleteTask = nil
+        pendingBoardDelete = nil
+        if !boards.contains(where: { $0.id == board.id }) {
+            boards.append(board)
+            boards.sort { $0.position < $1.position }
+        }
+        feedback = .idle
+    }
+
+    private func flushPendingBoardDelete() {
+        guard let board = pendingBoardDelete else { return }
+        pendingBoardDelete = nil
+        boardDeleteTask?.cancel()
+        boardDeleteTask = nil
+        if case .undoable = feedback { feedback = .idle }
+        Task { [weak self] in
+            do {
+                try await self?.repository.deleteBoard(id: board.id)
+            } catch {
+                self?.setError(error)
+            }
+            await self?.refreshBoards()
+        }
+    }
+
+    private func restartBoardDeleteTimer() {
+        boardDeleteTask?.cancel()
+        boardDeleteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.flushPendingBoardDelete()
         }
     }
 
@@ -426,8 +590,22 @@ final class ClipboardViewModel {
     // MARK: - 反馈（需求 §18）
 
     private func showFeedback(_ feedback: OperationFeedback, autoClearAfter: Duration?) {
+        // 撤销模型 = 「撤销提示可见才能撤销」：非撤销反馈出现即提交待删，
+        // 不允许 toast 被顶掉后后台还在静默提交的不一致状态
+        if case .undoable = feedback {} else {
+            flushPendingDeletes()
+            flushPendingBoardDelete()
+        }
         feedbackResetTask?.cancel()
         self.feedback = feedback
+        // VoiceOver 用户感知不到视觉 toast，逐条播报
+        if let text = feedback.announcementText {
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [.announcement: NSAttributedString(string: text)]
+            )
+        }
         guard let autoClearAfter else { return }
         feedbackResetTask = Task {
             try? await Task.sleep(for: autoClearAfter)

@@ -58,7 +58,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = AA000000000000000000000D /* Build configuration list for PBXNativeTarget "Paste" */;
 			buildPhases = (
-				AA0000000000000000000010 /* Build Rust Core */,
 				AA0000000000000000000007 /* Sources */,
 				AA0000000000000000000008 /* Frameworks */,
 				AA0000000000000000000009 /* Resources */,
@@ -118,20 +117,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		AA0000000000000000000010 /* Build Rust Core */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			name = "Build Rust Core";
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "\"$SRCROOT/Scripts/build-rust-core.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA0000000000000000000007 /* Sources */ = {
@@ -204,7 +189,7 @@
 				CODE_SIGN_IDENTITY = "AidoPaste Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -212,23 +197,11 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Paste;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
-				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.2.6;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-lpaste_core",
-				);
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paste.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
-				);
 			};
 			name = Debug;
 		};
@@ -240,7 +213,7 @@
 				CODE_SIGN_IDENTITY = "AidoPaste Dev";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = "";
 				ARCHS = arm64;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -249,22 +222,10 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Paste;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
-				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 0.2.6;
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-lpaste_core",
-				);
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paste.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_INCLUDE_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)/.build/rust/$(CONFIGURATION)",
-				);
 			};
 			name = Release;
 		};

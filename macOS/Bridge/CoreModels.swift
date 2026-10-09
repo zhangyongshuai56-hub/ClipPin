@@ -1,8 +1,7 @@
 import Foundation
 
-// 说明：UniFFI 生成的 PasteCore.swift 与本文件同属 app target（fileSystemSynchronizedGroups），
-// 其类型无需 import 即可直接使用；PasteCoreFFI 头文件经 SWIFT_INCLUDE_PATHS 提供给生成代码。
-// MARK: - Swift 领域模型（§55：UI 与 ViewModel 不接触 FFI 类型）
+// MARK: - Swift 领域模型（§55：UI 与 ViewModel 不接触存储层类型）
+// 原生 Swift 实现：无 FFI；存储层（PasteDatabase）直接产出 / 消费这些类型。
 
 /// 剪贴板条目类型。
 enum ClipboardEntryType: Hashable, Sendable, CaseIterable {
@@ -15,29 +14,29 @@ enum ClipboardEntryType: Hashable, Sendable, CaseIterable {
     case code
     case other
 
-    init(_ ffi: ItemType) {
-        switch ffi {
-        case .text: self = .text
-        case .url: self = .url
-        case .image: self = .image
-        case .file: self = .file
-        case .folder: self = .folder
-        case .richText: self = .richText
-        case .code: self = .code
-        case .other: self = .other
+    var title: String {
+        switch self {
+        case .text: "文本"
+        case .url: "链接"
+        case .image: "图片"
+        case .file: "文件"
+        case .folder: "文件夹"
+        case .richText: "富文本"
+        case .code: "代码"
+        case .other: "其他"
         }
     }
 
-    var ffi: ItemType {
+    var symbolName: String {
         switch self {
-        case .text: .text
-        case .url: .url
-        case .image: .image
-        case .file: .file
-        case .folder: .folder
-        case .richText: .richText
-        case .code: .code
-        case .other: .other
+        case .text: "doc.on.doc"
+        case .url: "globe"
+        case .image: "photo"
+        case .file: "doc"
+        case .folder: "folder"
+        case .richText: "doc.richtext"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .other: "doc.plaintext"
         }
     }
 }
@@ -49,16 +48,6 @@ enum RetentionPolicy: String, Hashable, Sendable, CaseIterable, Identifiable {
     case thirtyDays
     case ninetyDays
     case never
-
-    var ffi: Retention {
-        switch self {
-        case .oneDay: .oneDay
-        case .sevenDays: .sevenDays
-        case .thirtyDays: .thirtyDays
-        case .ninetyDays: .ninetyDays
-        case .never: .never
-        }
-    }
 
     var id: String { rawValue }
 
@@ -105,50 +94,31 @@ struct ClipboardEntry: Identifiable, Hashable, Sendable {
         else { return nil }
         return object["language"] as? String
     }
-}
 
-extension ClipboardEntry {
-    /// 从 UniFFI 生成的记录转换（同 target，无需模块限定）。
-    init(_ item: ClipboardItem) {
-        id = item.id
-        itemType = ClipboardEntryType(item.itemType)
-        createdAt = Date(timeIntervalSince1970: Double(item.createdAt) / 1000)
-        updatedAt = Date(timeIntervalSince1970: Double(item.updatedAt) / 1000)
-        title = item.title
-        preview = item.preview
-        textContent = item.textContent
-        url = item.url
-        filePath = item.filePath
-        imagePath = item.imagePath
-        thumbnailPath = item.thumbnailPath
-        sourceApp = item.sourceApp
-        sourceAppName = item.sourceAppName
-        contentSize = item.contentSize
-        uti = item.uti
-        isPinned = item.isPinned
-        metadata = item.metadata
-        removedFromHistory = item.removedFromHistory
-        titleIsCustom = item.titleIsCustom
-    }
-
-    /// 以既有内容再次构造输入：提交给 Core 后经 content_hash 去重只刷新最近使用时间（§17）。
+    /// 以既有内容再次构造输入：提交给存储层后经 content_hash 去重只刷新最近使用时间（§17）。
     func toNewItem() -> NewClipboardEntry {
         var item = NewClipboardEntry()
         item.itemType = itemType
         item.textContent = textContent
         item.url = url
         item.filePath = filePath
-        // Core 校验要求至少一种载荷；图片条目传已存原图路径，
-        // Core 按图片字节重算哈希即可命中已有条目走去重 touch（不会重复转存）
+        // 存储层校验要求至少一种载荷；图片条目传已存原图路径，
+        // 存储层按图片字节重算哈希即可命中已有条目走去重 touch（不会重复转存）
         item.imageSourcePath = itemType == .image ? imagePath : nil
         item.uti = uti
         item.createdAt = createdAt
         item.metadata = metadata
         return item
     }
-}
 
-// MARK: - 移除 / 编辑结果（需求：删除保留收藏、编辑记录）
+    /// 仅文本类记录可编辑内容；图片 / 文件不支持。
+    var isTextEditable: Bool {
+        switch itemType {
+        case .text, .code, .url, .richText, .other: true
+        case .image, .file, .folder: false
+        }
+    }
+}
 
 /// 从「剪贴板」历史移除条目的结果。
 enum ItemRemovalOutcome {
@@ -156,13 +126,6 @@ enum ItemRemovalOutcome {
     case deleted
     /// 已收藏：软删除，条目继续保留在所属文件夹中。
     case keptInBoard
-
-    init(_ outcome: RemovalOutcome) {
-        switch outcome {
-        case .deleted: self = .deleted
-        case .keptInBoard: self = .keptInBoard
-        }
-    }
 }
 
 /// 编辑文本条目的结果。
@@ -173,51 +136,13 @@ struct ItemEditOutcome {
     let merged: Bool
 }
 
-extension ClipboardEntry {
-    /// 仅文本类记录可编辑内容；图片 / 文件不支持。
-    var isTextEditable: Bool {
-        switch itemType {
-        case .text, .code, .url, .richText, .other: true
-        case .image, .file, .folder: false
-        }
-    }
-}
-
-extension ClipboardEntryType {
-    var title: String {
-        switch self {
-        case .text: "文本"
-        case .url: "链接"
-        case .image: "图片"
-        case .file: "文件"
-        case .folder: "文件夹"
-        case .richText: "富文本"
-        case .code: "代码"
-        case .other: "其他"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .text: "doc.on.doc"
-        case .url: "globe"
-        case .image: "photo"
-        case .file: "doc"
-        case .folder: "folder"
-        case .richText: "doc.richtext"
-        case .code: "chevron.left.forwardslash.chevron.right"
-        case .other: "doc.plaintext"
-        }
-    }
-}
-
-/// 新条目输入（§16 方向：Swift → Rust）。
+/// 新条目输入（§16 方向：UI → 存储层）。
 struct NewClipboardEntry: Sendable {
     var itemType: ClipboardEntryType = .text
     var textContent: String?
     var url: String?
     var filePath: String?
-    /// 图片暂存文件路径（§16：Core 按内容哈希转存后由调用方清理临时文件）。
+    /// 图片暂存文件路径（§16：存储层按内容哈希转存后由调用方清理临时文件）。
     var imageSourcePath: String?
     var uti: String?
     var sourceApp: String?
@@ -226,22 +151,6 @@ struct NewClipboardEntry: Sendable {
     var metadata: String?
     /// 捕获时间；nil 表示使用当前时间。
     var createdAt: Date?
-
-    func toFfi() -> NewClipboardItem {
-        NewClipboardItem(
-            itemType: itemType.ffi,
-            textContent: textContent,
-            url: url,
-            filePath: filePath,
-            imageSourcePath: imageSourcePath,
-            uti: uti,
-            sourceApp: sourceApp,
-            sourceAppName: sourceAppName,
-            title: title,
-            metadata: metadata,
-            createdAt: createdAt.map { Int64($0.timeIntervalSince1970 * 1000) }
-        )
-    }
 }
 
 /// 统计信息。
@@ -250,17 +159,6 @@ struct ClipboardStatistics: Hashable, Sendable {
     let pinnedCount: Int
     let totalContentSize: Int64
     let byType: [ClipboardEntryType: Int]
-
-    init(_ stats: Statistics) {
-        totalCount = Int(stats.totalCount)
-        pinnedCount = Int(stats.pinnedCount)
-        totalContentSize = stats.totalContentSize
-        var counts: [ClipboardEntryType: Int] = [:]
-        for entry in stats.byType {
-            counts[ClipboardEntryType(entry.itemType)] = Int(entry.count)
-        }
-        byType = counts
-    }
 }
 
 // MARK: - 用户可读错误（§82）
@@ -277,13 +175,13 @@ enum UserFacingError: LocalizedError, Sendable {
 
     init(_ error: PasteError) {
         switch error {
-        case .Database(let message): self = .database(message)
-        case .Storage(let message): self = .storage(message)
-        case .InvalidInput(let message): self = .invalidInput(message)
-        case .NotFound(let id): self = .notFound(id)
-        case .PermissionDenied(let message): self = .permissionDenied(message)
-        case .FileSystem(let message): self = .fileSystem(message)
-        case .Migration(_, let message): self = .migration(message)
+        case .database(let message): self = .database(message)
+        case .storage(let message): self = .storage(message)
+        case .invalidInput(let message): self = .invalidInput(message)
+        case .notFound(let id): self = .notFound(id)
+        case .permissionDenied(let message): self = .permissionDenied(message)
+        case .fileSystem(let message): self = .fileSystem(message)
+        case .migration(_, let message): self = .migration(message)
         }
     }
 
@@ -308,13 +206,6 @@ struct Pinboard: Identifiable, Hashable, Sendable {
     let name: String
     let color: String
     let position: Int
-
-    init(_ board: Board) {
-        id = board.id
-        name = board.name
-        color = board.color
-        position = Int(board.position)
-    }
 }
 
 /// 粘贴项目默认操作（需求：设置界面可选）。
@@ -344,7 +235,7 @@ enum PasteSettings {
     static let defaultActionKey = "defaultPasteAction"
     static let plainTextKey = "pastePlainText"
 
-    /// Enter / 双击执行的默认操作，默认粘贴到当前活动应用。
+    /// Enter 与双击卡片共用的默认操作，默认粘贴到当前活动应用。
     static var defaultAction: DefaultPasteAction {
         DefaultPasteAction(rawValue: UserDefaults.standard.string(forKey: defaultActionKey) ?? "")
             ?? .activeApp

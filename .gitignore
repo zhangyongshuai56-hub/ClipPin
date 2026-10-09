@@ -8,3 +8,4 @@ xcuserdata/
 rust-core/target/
 .mimosa/
 dist/
+.impeccable/

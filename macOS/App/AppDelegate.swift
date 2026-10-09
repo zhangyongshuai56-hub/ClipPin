@@ -7,6 +7,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let globalShortcutManager = GlobalShortcutManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 原生数据层自测：-PasteSelfTest 在临时库上跑关键断言后退出（退出码 0 / 1）
+        if ProcessInfo.processInfo.arguments.contains("-PasteSelfTest") {
+            let passed = PasteSelfTest.run()
+            exit(passed ? 0 : 1)
+        }
         // LSUIElement 兜底：确保应用以菜单栏常驻方式运行，不占用 Dock
         NSApp.setActivationPolicy(.accessory)
         // 0.2.0 改名迁移：接管旧 AidoPaste 的数据目录与用户偏好（幂等）

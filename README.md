@@ -6,16 +6,16 @@
 ## 技术架构
 
 - **前端**：SwiftUI + AppKit，macOS 15.0+，仅支持 Apple Silicon
-- **核心**：Rust Core（数据模型 / 去重 / 分类 / 搜索 / 清理）
-- **存储**：SQLite（FTS5 全文搜索），图片与缩略图存文件系统
-- **桥接**：UniFFI（Swift ↔ Rust），禁止 HTTP / WebSocket 方案
+- **核心**：纯 Swift 原生数据层（数据模型 / 去重 / 分类 / 搜索 / 清理，1.1.0 起移除 Rust）
+- **存储**：系统 libsqlite3 直连（FTS5 trigram 全文搜索），图片与缩略图存文件系统
+- **哈希**：CryptoKit SHA-256，禁止 HTTP / WebSocket 方案
 
-开发按 Phase 推进：Phase 1 macOS 基础 → Phase 2 Rust Core → Phase 3 UniFFI → Phase 4 Clipboard → ……
+数据层关键路径由 `-PasteSelfTest` 自测覆盖（81 项断言，临时库运行后退出）：
+`Paste.app/Contents/MacOS/Paste -PasteSelfTest`
 
 ## 构建
 
-环境要求：Xcode 16+（macOS 15 SDK）与 Rust stable（edition 2024 需 1.85+），
-Rust 经 rustup 安装：`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`。
+环境要求：Xcode 16+（macOS 15 SDK）。
 
 ```bash
 xcodebuild -scheme Paste -configuration Debug -derivedDataPath .build/DerivedData build
@@ -23,15 +23,8 @@ xcodebuild -scheme Paste -configuration Debug -derivedDataPath .build/DerivedDat
 
 产品输出：`.build/DerivedData/Build/Products/Debug/Paste.app`
 
-Rust Core 会在 Xcode 构建时由 `Scripts/build-rust-core.sh` 自动编译并生成 Swift 绑定，
-也可手动执行：
-
-```bash
-Scripts/build-rust-core.sh Debug    # 或 Release
-cd rust-core && cargo test          # Rust 单元测试 + 集成测试
-cargo clippy --all-targets -- -D warnings
-cargo fmt
-```
+打包 DMG：`Scripts/make-dmg.sh`（自动优先使用本地「AidoPaste Dev」签名证书，
+未安装时回退 ad-hoc；证书生成见 `Scripts/create-signing-cert.sh`）。
 
 ## 当前状态
 
@@ -146,6 +139,73 @@ Phase 13 已完成（UI 打磨）：
 
 全部 13 个 Phase 完成。技术栈：SwiftUI + AppKit + Rust Core + SQLite(FTS5) + UniFFI；
 65 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
+
+## 1.1.0 移植为纯 Swift 项目（移除 Rust 核心）
+
+- 数据层由 Rust Core + UniFFI 桥接重写为纯 Swift：系统 libsqlite3 直连（WAL / busy_timeout /
+  事务）、CryptoKit SHA-256 指纹、ImageIO 缩略图；构建不再需要 cargo / rustup，
+  移除每次构建都会执行的 "Build Rust Core" 脚本阶段
+- **schema 与语义逐行对拍移植**（v1→v4 迁移、24 个仓储方法签名不变、去重 / 分类 / 搜索 /
+  清理 / 文件夹行为一致），现有数据库原地打开，用户数据无损（实测 150+ 条真实数据）
+- 新增 `-PasteSelfTest` 自测钩子：81 项断言覆盖迁移 / 去重 / FTS+LIKE 搜索 / 软删除与
+  移出文件夹清除 / 编辑合并 / 清理 / 分类器 / 统计 / 图片转存（等价于退役的 65 个 Rust 测试的关键路径）
+- 删除：rust-core/、Scripts/build-rust-core.sh、UniFFI 生成代码与链接配置
+
+## 1.0.5 设计评审修复（撤销队列 / 错误可见性 / 快捷键图例 / 无障碍）
+
+- P0 修复：撤销只覆盖最后一次删除——改为待删队列，连续 ⌦ 累积在同一 4 秒滚动窗口，
+  「撤销」一次全部恢复（toast 显示「已从剪贴板移除 N 条」）；非撤销反馈（复制/粘贴）出现 =
+  窗口结束并立即提交，不再出现「toast 被顶掉、后台静默提交」的不一致；切换文件夹视图立即提交
+- 修复：删除文件夹从「即时且不可逆」并入同一撤销模式（chip 立即消失、4 秒内可撤销、零成本复原）
+- 修复：热键冲突静默失败——`shortcutErrorMessage` 此前被赋值但从未渲染，现在弹 alert 说明
+- 新增：面板底部快捷键图例条（设计稿元素）——↩ 提示跟随「默认操作」设置显示「粘贴到 Safari」
+  等上下文文案；默认操作为复制时位让给「⌘↩ 粘贴到当前应用」；右侧显示已加载条目数
+- 无障碍：toast 全部经 NSAccessibility announcement 播报（含 4 秒撤销窗口）；
+  卡片朗读补全置顶/时间/来源；VoiceOver 操作名跟随默认操作设置（「粘贴」/「复制」）；
+  文件夹 chips 增加 button 特征；卡片 9–10.5pt 硬编码字号改为可缩放语义样式（caption/caption2/subheadline）
+
+## 1.0.4 修复：双击恢复执行「默认操作」
+
+- 修复：1.0.3 把双击硬编码为复制到剪贴板，导致「默认操作 = 粘贴到当前活动应用」时双击粘贴失效——
+  双击恢复与 Enter 共用「默认操作」设置（粘贴到当前活动应用 / 复制到剪贴板，由用户自定义）
+- 设置 → 粘贴项目：「Enter 默认操作」改回「默认操作」，说明明确 Enter 与双击共用；
+  ⌘↩ 始终粘贴到当前活动应用，不受此设置影响
+
+## 1.0.3 双击复制到剪贴板
+
+- 双击卡片固定为**复制到系统剪贴板**（复用 ⌘C 路径：toast 反馈、防自捕获、最近使用时间刷新；
+  面板不收起、不抢焦点）；粘贴保留在 ↩（按「默认操作」设置）/ ⌘↩（始终粘贴到当前应用）/ 右键菜单
+- 设置 → 粘贴项目：「默认操作」更名为「Enter 默认操作」，说明补充双击与 ⌘↩ 语义
+- 修复：复制不再受「始终以纯文本粘贴」设置约束（该开关是粘贴语义），
+  此前开启后复制图片会误报「该内容暂不支持复制」
+
+## 1.0.2 修复：双击卡片无法粘贴
+
+- 根因：1.0.0 为按压反馈给卡片内部加了 `DragGesture(minimumDistance: 0)`，
+  它在 mouse-down 即完成识别并压制父视图的 `onTapGesture`（SwiftUI 子视图手势优先），
+  双击从未触发默认操作（无任何反馈即此症状）
+- 修复：单击/双击判定收口进按下手势的 onEnded（位移 <8pt 且时长 <0.5s 为点击，
+  双击间隔取系统 `NSEvent.doubleClickInterval`），拖走取消、长按不误触；
+  卡片补充 VoiceOver「粘贴」自定义操作
+
+## 1.0.1 修复：重新构建不再掉辅助功能权限
+
+- 根因：ad-hoc 签名没有稳定身份，macOS 按 cdhash 识别应用——每次重建 cdhash 都变，
+  TCC 当成新应用，辅助功能等授权需重新授予
+- 修复：`Scripts/create-signing-cert.sh` 一键生成并安装自签名代码签名证书
+  「AidoPaste Dev」（与工程 CODE_SIGN_IDENTITY 同名，含 codeSigning EKU，
+  导入登录钥匙串并预授权 /usr/bin/codesign 使用）；`make-dmg.sh` 自动优先用该证书签名，
+  未安装时回退 ad-hoc。换用本构建后需最后再授一次辅助功能权限，此后重建/升级不再掉权限
+
+## 1.0.0 交互升级
+
+- Quick Paste 成功反馈可见：面板保持到绿色「已粘贴到 X」toast 展示完再收（此前面板先隐藏，成功 toast 从未真正露出）
+- 置顶回到面板：右键「置顶 / 取消置顶」（⌘P，搜索框聚焦时同样可用）；置顶角标常驻卡片左下角
+- 删除可撤销：条目从界面立即移除，真正的删除延迟 4 秒提交，期间 toast 上可「撤销」；删除后选中自动落到同位置的下一张，连续 ⌦ 可逐张向后删
+- 显隐动画可打断：呼出/隐藏互为镜像（上浮 10pt + 淡入淡出），从当前呈现值出发、快速连按 ⌘⇧V 不再出现「刚显示就被上一次隐藏的回调吞掉」；reduce motion 时退化为快速淡入
+- 点击外部关闭宽限期分级：面板拿到过键盘焦点后 0.3s（响应优先），焦点未落位保留 1.5s 防误关
+- 卡片按下即时反馈（轻微缩放 + 背景加深，mouse-down 即触发）
+- 搜索按钮 ↔ 输入框展开为连贯变形动画（matched geometry，临界阻尼无过冲）
 
 ## 0.2.6 导入面板修复
 

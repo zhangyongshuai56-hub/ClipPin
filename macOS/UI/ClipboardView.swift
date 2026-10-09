@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// 剪贴板底部快速操作面板（需求 §20，参考 Paste 界面）：
-/// 顶部栏（搜索按钮 + Pinboard 文件夹 chips + 新建）→ 单行卡片流 → 快捷键提示条。
+/// 顶部栏（搜索按钮 + Pinboard 文件夹 chips + 新建）→ 单行卡片流 → 快捷键图例条。
 struct ClipboardView: View {
     @State private var viewModel: ClipboardViewModel
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
@@ -10,6 +10,8 @@ struct ClipboardView: View {
     @State private var keyMonitor: Any?
     /// 搜索模式：点击 🔍 后展开输入框（需求：搜索精简为按钮）。
     @State private var isSearching = false
+    /// 搜索按钮 ↔ 输入框的变形动画命名空间。
+    @Namespace private var searchNamespace
     /// 新建文件夹弹窗。
     @State private var isCreatingBoard = false
     @State private var newBoardName = ""
@@ -31,6 +33,8 @@ struct ClipboardView: View {
             topBar
             Divider()
             shelfArea
+            Divider()
+            shortcutFooter
         }
         .preferredColorScheme(appearance.colorScheme)
         .task {
@@ -41,10 +45,12 @@ struct ClipboardView: View {
         .onDisappear { removeKeyboardMonitor() }
         .overlay(alignment: .topTrailing) {
             if viewModel.feedback != .idle {
-                FeedbackToast(feedback: viewModel.feedback)
-                    .padding(.top, 58)
-                    .padding(.trailing, 14)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                FeedbackToast(feedback: viewModel.feedback) {
+                    viewModel.undoPendingAction()
+                }
+                .padding(.top, 58)
+                .padding(.trailing, 14)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.15), value: viewModel.feedback)
@@ -110,6 +116,7 @@ struct ClipboardView: View {
                 SearchField(viewModel: viewModel) {
                     isSearching = false
                 }
+                .matchedGeometryEffect(id: "search", in: searchNamespace)
             } else {
                 Button {
                     isSearching = true
@@ -119,11 +126,12 @@ struct ClipboardView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                         .frame(width: 24, height: 24)
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("搜索")
                 .keyboardShortcut("f", modifiers: .command)
+                .matchedGeometryEffect(id: "search", in: searchNamespace)
             }
 
             boardChips
@@ -144,6 +152,8 @@ struct ClipboardView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        // 搜索按钮 ↔ 输入框连贯变形（临界阻尼：无过冲）
+        .animation(.spring(response: 0.25, dampingFraction: 1.0), value: isSearching)
     }
 
     /// 板 chips：默认「剪贴板」+ 用户创建的文件夹。
@@ -201,6 +211,7 @@ struct ClipboardView: View {
             }
         }
         .accessibilityLabel("\(title)文件夹")
+        .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
@@ -239,24 +250,26 @@ struct ClipboardView: View {
     }
 
     private func card(_ entry: ClipboardEntry) -> some View {
-        ClipboardCard(entry: entry, isSelected: viewModel.selectionID == entry.id)
-            .id(entry.id)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                // 双击执行默认操作（需求 §8、§17）
+        // 单击选中 / 双击默认操作的判定在 ClipboardCard 内部的按下手势里
+        // （父视图 onTapGesture 会被子视图零距离拖拽手势压制，见 ClipboardCard 注释）；
+        // 双击与 Enter 共用「默认操作」设置（粘贴到当前活动应用 / 复制到剪贴板）
+        ClipboardCard(
+            entry: entry,
+            isSelected: viewModel.selectionID == entry.id,
+            onSelect: { viewModel.selectionID = entry.id },
+            onDoubleAction: {
                 Task { await viewModel.performDefaultAction(entry) }
             }
-            .onTapGesture {
-                viewModel.selectionID = entry.id
+        )
+        .id(entry.id)
+        .contextMenu { contextMenu(for: entry) }
+        // §36：拖拽导出
+        .onDrag { dragProvider(for: entry) }
+        .onAppear {
+            if entry.id == viewModel.entries.last?.id {
+                Task { await viewModel.loadNextPageIfNeeded() }
             }
-            .contextMenu { contextMenu(for: entry) }
-            // §36：拖拽导出
-            .onDrag { dragProvider(for: entry) }
-            .onAppear {
-                if entry.id == viewModel.entries.last?.id {
-                    Task { await viewModel.loadNextPageIfNeeded() }
-                }
-            }
+        }
     }
 
     /// 右键菜单（需求 §9/§10/§66 + 文件夹收藏）。
@@ -266,6 +279,10 @@ struct ClipboardView: View {
             Task { await viewModel.pasteToActiveApplication(entry) }
         }
         Button("复制到剪贴板") { viewModel.copyToClipboard(entry) }
+        Button(entry.isPinned ? "取消置顶" : "置顶") {
+            Task { await viewModel.togglePin(entry) }
+        }
+        .keyboardShortcut("p", modifiers: .command)
         Divider()
         if entry.isTextEditable {
             Button("编辑内容…") { editingEntry = entry }
@@ -296,9 +313,10 @@ struct ClipboardView: View {
             .disabled(entry.itemType != .url)
         Divider()
         // 删除语义按视图区分（需求：删除保留收藏）：
-        // 剪贴板视图移除收藏条目是软删除，文件夹视图内才是物理删除
+        // 剪贴板视图移除收藏条目是软删除，文件夹视图内才是物理删除；
+        // 真正的删除延迟提交，toast 上可撤销
         Button(viewModel.selectedBoardID == nil ? "从剪贴板移除" : "删除", role: .destructive) {
-            Task { await viewModel.delete(entry) }
+            viewModel.delete(entry)
         }
     }
 
@@ -323,6 +341,62 @@ struct ClipboardView: View {
             }
         }
         return NSItemProvider()
+    }
+
+    // MARK: - 快捷键图例条（设计稿元素：键盘模型可见化）
+
+    /// 底部图例：按「默认操作」设置给出 contextual 的 ↩ 提示；
+    /// 与默认操作重复的快捷键让位给 ⌘↩。右侧显示已加载条目数。
+    private var shortcutFooter: some View {
+        HStack(spacing: 12) {
+            ForEach(footerHints, id: \.key) { hint in
+                shortcutHint(key: hint.key, label: hint.label)
+            }
+            Spacer(minLength: 0)
+            Text("\(viewModel.entries.count)\(viewModel.canLoadMore ? "+" : "") 条记录")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    private struct FooterHint {
+        let key: String
+        let label: String
+    }
+
+    private var footerHints: [FooterHint] {
+        var hints: [FooterHint] = []
+        switch PasteSettings.defaultAction {
+        case .activeApp:
+            let target = viewModel.pasteTargetHint
+            hints.append(FooterHint(key: "↩", label: target.map { "粘贴到 \($0)" } ?? "粘贴到当前应用"))
+            hints.append(FooterHint(key: "⌘C", label: "复制到剪贴板"))
+        case .clipboard:
+            hints.append(FooterHint(key: "↩", label: "复制到剪贴板"))
+            hints.append(FooterHint(key: "⌘↩", label: "粘贴到当前应用"))
+        }
+        hints.append(FooterHint(key: "⌘P", label: "置顶"))
+        hints.append(FooterHint(key: "⌫", label: "删除"))
+        hints.append(FooterHint(key: "Esc", label: "关闭"))
+        return hints
+    }
+
+    private func shortcutHint(key: String, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .fixedSize()
     }
 
     // MARK: - 空状态（§52）
@@ -383,6 +457,10 @@ struct ClipboardView: View {
                     Task { await viewModel.performDefaultAction(entry) }
                 }
                 return nil
+            case 35 where commandPressed: // ⌘P：置顶 / 取消置顶
+                guard let entry = viewModel.selectedEntry else { return event }
+                Task { await viewModel.togglePin(entry) }
+                return nil
             case 53: // Esc：搜索中先清空 → 退出搜索 → 关闭面板
                 if !viewModel.searchText.isEmpty {
                     viewModel.searchText = ""
@@ -424,9 +502,13 @@ struct ClipboardView: View {
             guard commandPressed, let entry = viewModel.selectedEntry else { return event }
             renamingEntry = entry
             return nil
-        case 51, 117: // Delete：删除
+        case 35: // ⌘P：置顶 / 取消置顶
+            guard commandPressed, let entry = viewModel.selectedEntry else { return event }
+            Task { await viewModel.togglePin(entry) }
+            return nil
+        case 51, 117: // Delete：删除（延迟提交，toast 可撤销）
             guard let entry = viewModel.selectedEntry else { return event }
-            Task { await viewModel.delete(entry) }
+            viewModel.delete(entry)
             return nil
         case 53: // Esc：搜索中先清空 → 退出搜索 → 关闭面板
             if !viewModel.searchText.isEmpty {
@@ -599,6 +681,7 @@ private struct RenameBoardSheet: View {
 /// 操作反馈 toast（需求 §18）。
 struct FeedbackToast: View {
     let feedback: OperationFeedback
+    var onUndo: (() -> Void)? = nil
 
     var body: some View {
         switch feedback {
@@ -632,6 +715,24 @@ struct FeedbackToast: View {
             }
             .foregroundStyle(.white)
             .toastStyle(background: Color.green.opacity(0.92))
+        case .undoable(let text):
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                Text(text)
+                Button {
+                    onUndo?()
+                } label: {
+                    Text("撤销")
+                        .font(.system(size: 12.5, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.25), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("撤销删除")
+            }
+            .foregroundStyle(.white)
+            .toastStyle()
         case .failed(let message):
             HStack(spacing: 7) {
                 Image(systemName: "exclamationmark.triangle.fill")
