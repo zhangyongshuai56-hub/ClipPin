@@ -9,3 +9,5 @@ rust-core/target/
 .mimosa/
 dist/
 .impeccable/
+design/.mimosa/
+design/*.pem
