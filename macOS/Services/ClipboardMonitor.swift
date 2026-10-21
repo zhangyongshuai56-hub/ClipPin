@@ -28,6 +28,9 @@ final class ClipboardMonitor {
     private var isCapturing = false
     /// 当前捕获的开始时间；看门狗据此复位卡死的捕获状态，避免监听静默停摆。
     private var captureStartedAt: Date?
+    /// 捕获代数：每次启动新捕获自增。看门狗复位后旧捕获可能迟到完成，
+    /// 代号不匹配时不得复位新捕获的互斥标志（否则两个捕获并发）。
+    private var captureGeneration = 0
     /// 捕获看门狗超时：正常捕获毫秒级，超过即视为仓储层异常卡死。
     private static let captureWatchdogTimeout: TimeInterval = 15
 
@@ -108,6 +111,8 @@ final class ClipboardMonitor {
         isCapturing = true
         let startedAt = Date()
         captureStartedAt = startedAt
+        captureGeneration += 1
+        let generation = captureGeneration
 
         let sourceName = frontApp?.localizedName
         let repository = self.repository
@@ -140,7 +145,7 @@ final class ClipboardMonitor {
                 // §16：图片临时文件在 Core 转存（或跳过）后由 Swift 清理
                 payload.cleanupTemporaryFiles()
             }
-            await self.captureDidFinish()
+            await self.captureDidFinish(generation: generation)
         }
     }
 
@@ -158,7 +163,10 @@ final class ClipboardMonitor {
         logger.info("clipboard item skipped: too large bytes=\(byteSize)")
     }
 
-    private func captureDidFinish() {
+    private func captureDidFinish(generation: Int) {
+        // 看门狗复位后旧捕获迟到完成时代号已不匹配——不得清掉
+        // 新捕获正在使用的互斥标志，否则两个捕获会并发进行
+        guard generation == captureGeneration else { return }
         isCapturing = false
         captureStartedAt = nil
     }

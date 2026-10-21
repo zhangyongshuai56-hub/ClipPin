@@ -140,7 +140,12 @@ final class PasteService {
         isPasting = true
         defer { isPasting = false }
         let snapshot = captureCurrentContents()
-        guard write() else { return .writeFailed }
+        guard write() else {
+            // writeToPasteboard 可能已清板才发现失败（如图片文件被清理），
+            // 此时必须还原用户原剪贴板（§37：原 Clipboard 不能被破坏）
+            restore(snapshot)
+            return .writeFailed
+        }
         isBusy = true
         defer { isBusy = false }
         // 写板后立刻记录 changeCount，供恢复前校验（快照里没有这个信息）

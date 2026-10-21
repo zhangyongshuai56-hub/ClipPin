@@ -337,21 +337,26 @@ final class PasteDatabase {
     /// 从「剪贴板」历史移除条目（需求：删除保留收藏）。
     /// 未收藏条目物理删除（图片产物一并清理）；已收藏条目软删除（removed_from_history = 1
     /// 并取消置顶），继续保留在文件夹中；文件夹视图内的删除才是真删除。
+    /// 查询归属与 UPDATE/DELETE 同事务：中途崩溃不会留下半程状态。
     func removeItemFromHistory(id: Int64) throws -> ItemRemovalOutcome {
-        let boardId: Int64?? = try connection.queryFirst(
-            "SELECT board_id FROM clipboard_items WHERE id = ?1",
-            [.int(id)]) { try $0.intOrNil("board_id") }
-        guard let boardId else { throw PasteError.notFound(id) }
-        if boardId != nil {
-            try connection.run(
-                "UPDATE clipboard_items SET removed_from_history = 1, is_pinned = 0 WHERE id = ?1",
-                [.int(id)])
-            return .keptInBoard
+        var artifacts: [(String?, String?)] = []
+        let outcome: ItemRemovalOutcome = try connection.transaction {
+            let boardId: Int64?? = try connection.queryFirst(
+                "SELECT board_id FROM clipboard_items WHERE id = ?1",
+                [.int(id)]) { try $0.intOrNil("board_id") }
+            guard let boardId else { throw PasteError.notFound(id) }
+            if boardId != nil {
+                try connection.run(
+                    "UPDATE clipboard_items SET removed_from_history = 1, is_pinned = 0 WHERE id = ?1",
+                    [.int(id)])
+                return .keptInBoard
+            }
+            artifacts = try fetchArtifacts(ids: [id])
+            try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
+            return .deleted
         }
-        let artifacts = try fetchArtifacts(ids: [id])
-        try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
         artifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
-        return .deleted
+        return outcome
     }
 
     /// 设置条目的「从历史移除」标记（导入备份时还原软删除状态）。
@@ -404,6 +409,12 @@ final class PasteDatabase {
                 "SELECT id, board_id FROM clipboard_items WHERE content_hash = ?1 AND id != ?2",
                 [.text(contentHash), .int(id)],
                 map: { (id: try $0.int("id"), boardId: try $0.intOrNil("board_id")) }) {
+                // ?5 必须绑定被编辑条目（本行，尚未删除）的 board_id——
+                // 归并规则「目标侧无文件夹时继承本条」；绑成目标行自己的值
+                // 会让 COALESCE 变成 no-op，继承永远不生效。
+                let editedBoardId: Int64?? = try connection.queryFirst(
+                    "SELECT board_id FROM clipboard_items WHERE id = ?1",
+                    [.int(id)]) { try $0.intOrNil("board_id") }
                 mergedArtifacts = try fetchArtifacts(ids: [id])
                 try connection.run(
                     """
@@ -420,7 +431,7 @@ final class PasteDatabase {
                         .int(now),
                         .int(existing.isPinned ? 1 : 0),
                         .int(existing.removedFromHistory ? 1 : 0),
-                        .intOrNil(kept.boardId),
+                        .intOrNil(editedBoardId ?? nil),
                         .int(Int64(existing.createdAt.timeIntervalSince1970 * 1000)),
                     ])
                 try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
@@ -580,20 +591,30 @@ final class PasteDatabase {
 
     /// 把条目移入文件夹（boardId = nil 表示移回默认「剪贴板」）。
     /// 移出文件夹时若条目此前已从历史软删除，将不再出现在任何视图，物理删除之。
+    /// UPDATE 与条件物理删除同事务：中途崩溃不会留下「已移出文件夹却仍存在」的幽灵行。
     func setItemBoard(id: Int64, boardId: Int64?) throws {
         if let boardId {
             let exists = try connection.scalarInt("SELECT COUNT(*) FROM boards WHERE id = ?1", [.int(boardId)])
             guard exists > 0 else { throw PasteError.notFound(boardId) }
         }
-        let changed = try connection.run(
-            "UPDATE clipboard_items SET board_id = ?2 WHERE id = ?1",
-            [.int(id), .intOrNil(boardId)])
-        if changed == 0 {
-            throw PasteError.notFound(id)
+        var removedArtifacts: [(String?, String?)] = []
+        try connection.transaction {
+            let changed = try connection.run(
+                "UPDATE clipboard_items SET board_id = ?2 WHERE id = ?1",
+                [.int(id), .intOrNil(boardId)])
+            if changed == 0 {
+                throw PasteError.notFound(id)
+            }
+            if boardId == nil {
+                let removed = try connection.scalarInt(
+                    "SELECT removed_from_history FROM clipboard_items WHERE id = ?1", [.int(id)]) != 0
+                if removed {
+                    removedArtifacts = try fetchArtifacts(ids: [id])
+                    try connection.run("DELETE FROM clipboard_items WHERE id = ?1", [.int(id)])
+                }
+            }
         }
-        if boardId == nil, try getItem(id: id).removedFromHistory {
-            try deleteItem(id: id)
-        }
+        removedArtifacts.forEach { imageStore.remove(imagePath: $0.0, thumbnailPath: $0.1) }
     }
 
     /// 重命名文件夹（需求：文件夹重命名）。

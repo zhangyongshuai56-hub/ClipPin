@@ -10,7 +10,7 @@
 - **存储**：系统 libsqlite3 直连（FTS5 trigram 全文搜索），图片与缩略图存文件系统
 - **哈希**：CryptoKit SHA-256，禁止 HTTP / WebSocket 方案
 
-数据层关键路径由 `-PasteSelfTest` 自测覆盖（81 项断言，临时库运行后退出）：
+数据层关键路径由 `-PasteSelfTest` 自测覆盖（102 项断言，临时库运行后退出）：
 `Paste.app/Contents/MacOS/Paste -PasteSelfTest`
 
 ## 构建
@@ -139,6 +139,22 @@ Phase 13 已完成（UI 打磨）：
 
 全部 13 个 Phase 完成。技术栈：SwiftUI + AppKit + Rust Core + SQLite(FTS5) + UniFFI；
 65 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
+
+## 1.1.2 代码审查修复（剪贴板数据安全 / 撤销顺序 / 归并继承 / 监听竞态）
+
+- 修复：复制失败会静默清空用户当前剪贴板——`writeToPasteboard` 改为**先备妥载荷
+  （文本内容、文件存在性、图片字节）再清板**，所有可预判的失败路径都不再触碰用户剪贴板；
+  Quick Paste 的 `writeFailed` 分支补上剪贴板快照恢复（原路径直接丢弃快照）
+- 修复：撤销删除后条目顺序颠倒——连续 ⌦ 删除的待删记录都落在收缩后的同一 index，
+  撤销改为**按 index 降序插回**，精确还原删除前顺序（[A,B,C,D] 连删 B/C/D 撤销曾得 [A,D,C,B]）
+- 修复：编辑合并的文件夹归属继承从未生效——合并 SQL 的 `?5` 原先绑定保留行自己的
+  `board_id`（`COALESCE(board_id, board_id)` 退化为 no-op），现改为绑定**被编辑条目**的归属；
+  新增 2 条自测断言覆盖该回归
+- 修复：监听器看门狗复位后，旧捕获迟到完成会清掉新捕获的互斥标志——引入捕获代号，
+  代号不匹配不再复位，两个捕获并发的不变量恢复
+- 加固：`setItemBoard` / `removeItemFromHistory` 的多步写入并入单事务，
+  中途崩溃不留「已移出文件夹却仍存在」等半程状态
+- 数据层自测断言数 81 → 102（含 2 条新增回归断言）
 
 ## 1.1.0 移植为纯 Swift 项目（移除 Rust 核心）
 

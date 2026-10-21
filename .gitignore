@@ -11,3 +11,4 @@ dist/
 .impeccable/
 design/.mimosa/
 design/*.pem
+Scripts/*.pem

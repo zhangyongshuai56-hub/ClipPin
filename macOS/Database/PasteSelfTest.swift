@@ -176,6 +176,18 @@ final class PasteSelfTest: @unchecked Sendable {
         expectThrows("merged row deleted", { try database.getItem(id: willMerge.id) })
         expect(mergedOutcome.entry.isPinned, "merge preserves pin from edited row")
 
+        // 编辑合并继承文件夹：板内条目编辑成与历史条目重复时，保留行应继承该板归属
+        // （回归：?5 曾误绑保留行自己的 board_id，COALESCE 成 no-op，继承永不生效）
+        let mergeBoard = try database.createBoard(name: "合并继承板", color: "#4F8EF7")
+        let historyTwin = try database.createItem(textEntry("待被板内条目合并的历史内容")).entry
+        let boardTwin = try database.createItem(textEntry("将被改成重复的板内内容")).entry
+        try database.setItemBoard(id: boardTwin.id, boardId: mergeBoard.id)
+        let inheritOutcome = try database.editTextItem(id: boardTwin.id, newText: "待被板内条目合并的历史内容")
+        expect(inheritOutcome.merged && inheritOutcome.entry.id == historyTwin.id, "edit merges board row into history row")
+        let boardMembers = ids(try database.getItems(filter: nil, boardId: mergeBoard.id, limit: 50, offset: 0))
+        expect(boardMembers == [historyTwin.id], "merge inherits board from edited row")
+        try database.deleteBoard(id: mergeBoard.id)
+
         // 重新复制软删除条目 → 恢复历史可见（此前 dedup touch 隐藏行，历史无反应）
         let recopied = try database.createItem(textEntry("软删后重新复制")).entry
         try database.setItemBoard(id: recopied.id, boardId: board.id)

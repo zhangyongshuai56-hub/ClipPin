@@ -334,42 +334,42 @@ final class ClipboardViewModel {
 
     private func writeToPasteboard(_ entry: ClipboardEntry, forcePlainText: Bool) -> Bool {
         let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let success: Bool
+        // 先备妥载荷、确认可写，再清板：clearContents 一旦执行，用户当前剪贴板
+        // 即被销毁。图片读不出 / 文件已消失 / 纯文本开关下的图片等失败路径
+        // 必须在清板前判定，否则一次失败的复制会静默毁掉用户正在使用的内容。
+        var write: (() -> Bool)?
         switch entry.itemType {
         case .text, .code, .richText, .url, .other:
             // 纯文本开关：URL / 富文本也只写纯文本
             if let text = entry.textContent ?? entry.url {
-                success = pasteboard.setString(text, forType: .string)
-            } else {
-                success = false
+                write = { pasteboard.setString(text, forType: .string) }
             }
         case .file, .folder:
             // §60：文件以 File URL 交给目标 App，不复制文件本体
-            if let path = entry.filePath {
+            if let path = entry.filePath,
+               FileManager.default.fileExists(atPath: path) {
                 let url = NSURL(fileURLWithPath: path)
-                success = pasteboard.writeObjects([url])
-            } else {
-                success = false
+                write = { pasteboard.writeObjects([url]) }
             }
         case .image:
             // 直接写原始图片字节，保留原格式（NSImage.writeObjects 会统一转成 TIFF）
-            if forcePlainText {
-                success = false
-            } else if let path = entry.imagePath {
+            if !forcePlainText, let path = entry.imagePath {
                 let url = URL(fileURLWithPath: path)
                 let type: NSPasteboard.PasteboardType =
                     url.pathExtension.lowercased() == "png" ? .png : .tiff
                 if let data = try? Data(contentsOf: url) {
-                    success = pasteboard.setData(data, forType: type)
-                } else {
-                    success = false
+                    write = { pasteboard.setData(data, forType: type) }
                 }
-            } else {
-                success = false
             }
         }
-        guard success else {
+        guard let write else {
+            errorMessage = "该内容暂不支持复制。"
+            return false
+        }
+        pasteboard.clearContents()
+        guard write() else {
+            // 载荷已备妥仍写入失败（罕见）；板已被清空，Quick Paste 路径
+            // 由 PasteService.runQuickPaste 的 writeFailed 分支恢复快照兜底。
             errorMessage = "该内容暂不支持复制。"
             return false
         }
@@ -460,7 +460,10 @@ final class ClipboardViewModel {
         pendingDeleteTask?.cancel()
         pendingDeleteTask = nil
         let mostRecent = pendingDeletes.last
-        let restores = pendingDeletes.sorted { $0.index < $1.index }
+        // 降序插回：连续 ⌦ 的每条记录都在收缩后的同一 index（删除后选中项落回
+        // 同位置），升序插入会把顺序颠倒（[A,B,C,D] 连删 B/C/D 撤销得 [A,D,C,B]）；
+        // 降序在同 index 与混合 index 场景均可精确还原删除前的顺序。
+        let restores = pendingDeletes.sorted { $0.index > $1.index }
         pendingDeletes.removeAll()
         for pending in restores {
             let index = min(pending.index, entries.count)
