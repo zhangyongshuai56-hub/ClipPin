@@ -1,0 +1,266 @@
+# PROJECT_MAP
+
+> Paste — 本地优先的 macOS 原生剪贴板管理器（原 AidoPaste，0.2.0 改名）。
+> 本文档基于对仓库源码与工程文件的静态分析生成，描述当前代码的实际结构与依赖。
+
+## 1. 项目概览
+
+| 项 | 值 | 依据 |
+| --- | --- | --- |
+| 产品 | Paste（菜单栏常驻剪贴板管理器，无 Dock 图标） | `INFOPLIST_KEY_LSUIElement = YES`、README |
+| 版本 | 1.1.1（build 17） | `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`（project.pbxproj） |
+| 语言 | Swift 6.0，纯原生（1.1.0 起移除 Rust 核心，无第三方依赖） | `SWIFT_VERSION = 6.0`、README「1.1.0 移植为纯 Swift 项目」 |
+| UI 框架 | SwiftUI + AppKit（`@main` App + MenuBarExtra + NSPanel） | `macOS/App/PasteApp.swift`、`macOS/Window/ClipboardWindow.swift` |
+| 存储 | 系统 libsqlite3 直连（WAL、FTS5 trigram 全文索引）+ 文件系统（图片/缩略图）+ UserDefaults（设置） | `SQLiteDatabase.swift`、`ImageStore.swift`、各 `*Settings.swift` |
+| 哈希/去重 | CryptoKit SHA-256（`content_hash` 唯一索引去重） | `ContentClassifier.swift`、schema v3 迁移 |
+| 最低系统 | macOS 15.0 | `MACOSX_DEPLOYMENT_TARGET = 15.0` |
+| 架构 | Release 限 arm64（`ARCHS = arm64`）；Debug `ONLY_ACTIVE_ARCH = YES` 按本机架构 | project.pbxproj |
+| Target | 单 target `Paste`（app），无测试 target；数据层测试经 `-PasteSelfTest` 启动参数钩子 | project.pbxproj、`AppDelegate.swift` |
+| 工程组织 | `PBXFileSystemSynchronizedRootGroup` 同步 `macOS/` 与 `Resources/` 目录——目录内新增文件自动纳入编译 | project.pbxproj |
+| 网络 | 无网络依赖（本地优先） | README；代码中未发现网络 import |
+
+## 2. 顶层目录树
+
+```
+Paste/
+├── Paste.xcodeproj/            # Xcode 工程（单 target「Paste」，Debug/Release 配置）
+│   └── xcshareddata/xcschemes/Paste.xcscheme   # 共享 scheme
+├── macOS/                      # ★ 全部 Swift 源码（工程同步组，自动参与编译）
+│   ├── App/                    # 程序入口与全局状态
+│   ├── Bridge/                 # 领域模型层（UI 与存储层之间的共享类型）
+│   ├── Database/               # 存储层（SQLite、分类器、图片库、自测）
+│   ├── Services/               # 应用服务（监听、仓储、清理、粘贴、迁移、导入导出、设置）
+│   ├── Shortcut/               # 全局快捷键（Carbon）
+│   ├── ViewModel/              # 主面板视图模型
+│   ├── UI/                     # SwiftUI 视图（面板、卡片、设置）
+│   ├── MenuBar/                # 菜单栏菜单
+│   └── Window/                 # 面板窗口（NSPanel）与窗口生命周期管理
+├── Resources/
+│   └── Assets.xcassets/        # 资产目录（AppIcon 16~1024 全尺寸）
+├── Scripts/
+│   ├── make-dmg.sh             # Release 构建 + 打 DMG（输出 dist/Paste-<版本>.dmg）
+│   ├── create-signing-cert.sh  # 生成本地自签名代码签名证书「AidoPaste Dev」
+│   └── aidopaste-dev-cert.pem  # 证书公钥备份（.gitignore 已排除 *.pem）
+├── design/                     # UI 设计稿（HTML 原型 + PNG 预览），不参与编译
+├── dist/                       # 打包产物（Paste-1.1.1.dmg；.gitignore 已排除）
+├── README.md                   # 产品说明 + 完整版本历史（Phase 1~13、1.0.x~1.1.0）
+├── .gitignore
+└── PROJECT_MAP.md              # 本文档
+```
+
+## 3. 核心文件与模块说明
+
+### 3.1 App/ —— 入口与全局状态
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `PasteApp.swift` | 22 | `@main` 入口。两个 Scene：`MenuBarExtra`（菜单栏菜单，`.menu` 风格）+ `Settings`（设置窗口）；向两处注入 `appState` environment |
+| `AppDelegate.swift` | 66 | 启动编排：自测钩子 → accessory 激活策略 → 旧数据迁移 → 异步 bootstrap 数据层 → 启动监听/清理调度/全局快捷键；退出时停监听与调度 |
+| `AppState.swift` | 67 | `@Observable` 全局运行时状态：`isPaused`（暂停记录，持久化于 UserDefaults）；另含 `AppearanceMode`（跟随系统/浅色/深色） |
+
+### 3.2 Bridge/ —— 领域模型（跨层共享类型）
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `CoreModels.swift` | 255 | UI 与存储层共用的领域模型（UI 不接触 SQL 类型）：`ClipboardEntry`、`NewClipboardEntry`、`ClipboardEntryType`（text/url/image/file/folder/richText/code/other）、`RetentionPolicy`、`Pinboard`、`ClipboardStatistics`、`CreateItemOutcome`/`ItemRemovalOutcome`/`ItemEditOutcome`、`PasteError` → `UserFacingError` 文案映射、`PasteSettings`（默认粘贴操作 + 纯文本开关，UserDefaults 键读取） |
+
+### 3.3 Database/ —— 存储层
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `PasteDatabase.swift` | 1021 | 数据库门面。schema v5 + `user_version` 迁移框架（只追加不改历史）：v1 初始表 + FTS5 trigram 外容表与触发器；v2 `boards` 文件夹表；v3 `content_hash` 唯一索引（先清历史重复）；v4 `removed_from_history`/`title_is_custom` 软删除与命名；v5 FTS 触发器加 WHEN 条件优化。提供全部 SQL 操作：CRUD、去重 touch、FTS/LIKE 搜索（≥3 字符走 FTS5，短查询回退 LIKE）、Pin、软删除、编辑合并、文件夹 CRUD、过期清理/历史上限/孤儿清扫、统计 |
+| `SQLiteDatabase.swift` | 216 | 系统 libsqlite3 最小封装：单连接、WAL、`busy_timeout=5000`、事务（抛错回滚）、按列名取行的类型安全访问器 |
+| `ContentClassifier.swift` | 126 | 三件套：`PasteError` 核心错误模型；文本类型细分（URL 主机名校验 / 代码语言计分识别 JSON、shebang、Swift、Python、JS、SQL、Shell）写入 metadata；`sha256Hex` 内容指纹（去重唯一依据） |
+| `ImageStore.swift` | 122 | 图片落盘：原图按内容哈希存 `Images/`，320px PNG 缩略图（ImageIO 下采样）存 `Thumbnails/`；临时文件 + rename 原子写；孤儿文件清扫（`.tmp-` 一小时内视为进行中受保护） |
+| `PasteSelfTest.swift` | 395 | `-PasteSelfTest` 自测：临时内存库跑迁移/去重/搜索/软删除/编辑合并/清理/分类器/图片转存/导入导出往返等断言，打印 `SELFTEST PASS/FAIL` 后以退出码 0/1 退出 |
+
+### 3.4 Services/ —— 应用服务层
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `CoreStore.swift` | 52 | 数据层生命周期单例：建库目录（`~/Library/Application Support/Paste/Database`，0700/0600 权限）、后台初始化 `ClipboardRepository`、失败记录 `startupError` 供弹窗展示（失败可见，不静默降级） |
+| `ClipboardRepository.swift` | 129 | `actor` 仓储层：所有数据库访问的唯一入口（串行化），24 个方法转发到 `PasteDatabase`；ViewModel/UI 不接触存储层 |
+| `ClipboardMonitor.swift` | 165 | 剪贴板监听：0.5s Timer 检查 `changeCount`（挂 `.common` mode），读取与入库在后台线程；防自捕获（ClipboardChangeGate）、排除应用、暂停状态同步推进基线、15s 看门狗复位卡死捕获；入库成功发 `clipboardMonitorDidSaveItem` 通知 |
+| `ClipboardReader.swift` | 131 | 从 NSPasteboard 读取统一载荷：跳过 `org.nspasteboard.Concealed/Transient/AutoGenerated` 敏感标记；优先级 fileURL → 文本 → 图片（PNG/TIFF 落临时文件传路径）；受 `CaptureSettings` 开关过滤 |
+| `ClipboardPayload.swift` | 89 | 统一载荷模型（text / image 临时文件 / files 引用）；大小上限判定（§51）；转 `NewClipboardEntry` 列表（文件一文件一条） |
+| `ClipboardChangeGate.swift` | 39 | 自写抑制表（§18）：复制/恢复剪贴板后登记 changeCount，监听器消费跳过；记录带 2s 时间窗自动作废 |
+| `PasteService.swift` | 165 | Quick Paste 编排（单例）：快照用户剪贴板 → 写板 → 隐藏面板 → 协作式激活之前的前台应用 → 合成 ⌘V（CGEvent）→ 延时恢复快照（恢复前校验 changeCount 防覆盖第三方写入）；辅助功能权限检查与系统设置跳转 |
+| `CleanupScheduler.swift` | 115 | 自动清理调度（单例）：启动一轮 + 按用户频率（N 分钟/小时/天，默认 1 小时）轮询；三步独立容错（过期 → 上限 → 孤儿文件）；有删除发 `cleanupSchedulerDidCleanup` 通知 UI |
+| `LibraryTransfer.swift` | 509 | 导入/导出（跨机器迁移）：全部文件夹 + 记录 → 单个 `.pasteexport` JSON（图片 base64 内嵌，流式写出）；导入同名合并、按 content_hash 去重、跨机器无效文件引用跳过计数 |
+| `LegacyMigrator.swift` | 59 | 一次性改名迁移（AidoPaste → Paste）：搬数据目录 + 从旧偏好域接管 15 个设置键；两项均幂等 |
+| `LaunchAtLoginService.swift` | 17 | 登录启动：`SMAppService.mainApp` 官方机制，失败抛错给 UI 展示 |
+| `ExcludedApps.swift` | 58 | 排除应用（前台是这些 Bundle ID 时不记录）：内置密码管理器/钥匙串 + 用户自定义（UserDefaults，含格式校验） |
+| `CaptureSettings.swift` | 50 | 捕获设置（UserDefaults 读取封装）：单条大小上限（默认 50MB）、保存图片/文件/URL 开关 |
+| `CleanupSettings.swift` | 84 | 清理设置（UserDefaults 读取封装）：保留时长（默认 30 天）、历史上限（默认 1000，0=不限）、清理频率（数值+单位） |
+
+### 3.5 Shortcut/、Window/、ViewModel/、UI/、MenuBar/ —— 界面与交互层
+
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `Shortcut/GlobalShortcutManager.swift` | 200 | `HotKeyCombo`（Carbon 键码组合，UserDefaults 持久化自定义，默认 ⌘⇧V）+ `GlobalShortcutManager`（`RegisterEventHotKey` 注册，失败抛用户可读错误）；回调经 C 桥接盒子 |
+| `Window/WindowManager.swift` | 284 | 面板生命周期单例：创建 `ClipboardWindow` + 注入 ViewModel；底部居中定位（鼠标所在屏）、尺寸持久化与钳制；显隐镜像动画（0.15~0.2s，代数机制防打断吞回调）；失活/点击外部关闭（宽限期分级、Quick Paste 守卫）；快捷键 toggle 语义 |
+| `Window/ClipboardWindow.swift` | 71 | `NSPanel` 子类：`.nonactivatingPanel`（Spotlight 模型，不激活应用也能成为 key）、悬浮层级、全空间可见、隐藏标题栏、毛玻璃；默认尺寸 1000×280 |
+| `ViewModel/ClipboardViewModel.swift` | 632 | `@Observable` 主视图模型：列表/分页（每页 50、滚动加载、并发加载只让最新结果生效）、防抖搜索（200ms）、键盘/网格导航、Pinboard 文件夹管理、动作分发（默认操作/粘贴/复制/删除撤销队列 4s 滚动窗/命名/编辑）、监听 `clipboardMonitorDidSaveItem`/`cleanupSchedulerDidCleanup` 防抖刷新；缩略图 NSCache（200 项/64MB） |
+| `UI/ClipboardView.swift` | 798 | 面板主界面：顶部栏（搜索按钮变形动画 + 板 chips + 新建）→ 卡片网格 → 快捷键图例条；NSEvent 本地键盘监听（↑↓←→/Enter/⌘↩/⌘C/⌘P/⌦/⌘R/⌘E/Esc，输入法组词让行）；重命名/编辑/文件夹模态 |
+| `UI/ClipboardCard.swift` | 300 | 单张卡片：内容预览（文本/URL/代码徽章/图片缩略图/文件）、来源与时间、置顶角标；单击/双击判定收口在按下手势 onEnded（绕开 SwiftUI 手势仲裁）；VoiceOver 支持 |
+| `UI/SettingsView.swift` | 573 | 设置窗口五页：通用（登录启动/外观/快捷键录制）、剪贴板（保留时长/上限/频率/立即清理/捕获开关/大小上限）、数据（导入/导出）、隐私（暂停/排除应用/辅助功能状态）、关于 |
+| `MenuBar/MenuBarContentView.swift` | 31 | 菜单栏菜单：打开/搜索剪贴板、暂停记录、设置、退出 |
+
+## 4. 模块依赖关系
+
+### 4.1 分层依赖（自上而下，禁止反向）
+
+```
+┌────────────────────────── 展示层 ──────────────────────────┐
+│  MenuBarContentView   ClipboardView / ClipboardCard        │
+│           │                        │                       │
+│           │                  ClipboardViewModel            │
+│  SettingsView ──────────────┬──────┘                       │
+└─────────────┬───────────────┼──────────────────────────────┘
+              │               │
+┌─────────────▼───────────────▼────────────── 应用服务层 ─────┐
+│  WindowManager  PasteService  ClipboardMonitor             │
+│  GlobalShortcutManager  CleanupScheduler  LibraryTransfer  │
+│  ClipboardReader/ClipboardPayload  ClipboardChangeGate     │
+│  CoreStore  LegacyMigrator  LaunchAtLoginService           │
+│  CaptureSettings / CleanupSettings / ExcludedApps (UserDefaults) │
+└─────────────────────────────┬──────────────────────────────┘
+                              │ 唯一数据入口
+┌─────────────────────────────▼──────────────────────────────┐
+│  ClipboardRepository (actor)          ← Bridge/CoreModels  │
+└─────────────────────────────┬──────────────────────────────┘
+┌─────────────────────────────▼────────────── 存储层 ─────────┐
+│  PasteDatabase ── SQLiteDatabase (libsqlite3)              │
+│        ├── ImageStore (Images/ + Thumbnails/)              │
+│        └── ContentClassifier / sha256Hex (CryptoKit)       │
+└────────────────────────────────────────────────────────────┘
+```
+
+要点（均经源码确认）：
+
+- **`ClipboardRepository` 是唯一数据入口**：ViewModel 与 SettingsView（导入导出）都只拿它，不触碰 `PasteDatabase`/SQL。
+- **`CoreStore.shared` 是仓储的分发点**：AppDelegate（bootstrap）、WindowManager（创建 ViewModel）、SettingsView（导入导出取仓储）三处引用。
+- **跨层解耦靠两个 NotificationCenter 通知**：`clipboardMonitorDidSaveItem`（监听器 → ViewModel 刷新）、`cleanupSchedulerDidCleanup`（调度器 → ViewModel 刷新）——服务层不直接持有 UI。
+- **`PasteService.shared` 与 `ClipboardChangeGate.shared` 是横向共享单例**：被 WindowManager（记录粘贴目标/守卫）、ClipboardViewModel（Quick Paste、登记抑制）、ClipboardView（辅助功能引导）、SettingsView（权限状态）、ClipboardMonitor（消费抑制）、PasteService（登记恢复抑制）共同使用。
+- **设置读取统一走 UserDefaults 封装**（`CaptureSettings`/`CleanupSettings`/`ExcludedApps`/`PasteSettings`/`AppearanceMode`/`HotKeyCombo.stored`），SettingsView 用 `@AppStorage` 写同一批键，无双份真相。
+- `PasteApp` → `AppDelegate`（`@NSApplicationDelegateAdaptor`）；`AppDelegate` 持有 `AppState`，经 environment 注入两个 Scene。
+
+### 4.2 捕获数据流（复制 → 入库 → 界面）
+
+```
+用户在其他 App 复制
+  └► ClipboardMonitor.checkOnce()          主线程，0.5s 轮询 changeCount
+       ├─ 暂停 / 排除应用 / 自写抑制 → 跳过
+       └► ClipboardReader.read()           后台线程，产出 ClipboardPayload
+            └► payload.toNewItems()
+                 └► ClipboardRepository.create()   actor 串行
+                      └► PasteDatabase.createItem()
+                           ├─ resolveNewItem：类型按文件系统纠正
+                           ├─ 分类器（URL/Code/Text）+ SHA-256 指纹
+                           ├─ 去重：命中 content_hash → 仅 touch 刷新时间
+                           └─ 图片 → ImageStore 转存原图 + 缩略图
+  └► NotificationCenter .clipboardMonitorDidSaveItem
+       └► ClipboardViewModel 防抖刷新列表 → ClipboardView 渲染卡片
+```
+
+### 4.3 Quick Paste 数据流（Enter / 双击 → 粘贴到目标应用）
+
+```
+ClipboardViewModel.performDefaultAction / pasteToActiveApplication
+  └► PasteService.runQuickPaste(write: ViewModel 写板闭包)
+       ├─ AXIsProcessTrusted？否 → UI 弹窗引导系统设置
+       ├─ 快照当前剪贴板 → write()（写板 + ClipboardChangeGate.suppress 防自捕获）
+       ├─ 激活 previousApp（呼出面板前由 noteWindowAboutToShow 记录）
+       ├─ CGEvent 合成 ⌘V → 延时 600ms → changeCount 校验 → 恢复快照
+       └─ 返回 outcome → ViewModel 发 toast（含 NSAccessibility 播报）→ WindowManager 收面板
+```
+
+## 5. 程序入口与启动流程
+
+**入口**：`macOS/App/PasteApp.swift` 的 `@main struct PasteApp`。
+
+```
+PasteApp.body
+  ├─ MenuBarExtra(.menu)  ── label: appState.statusBarSymbolName（暂停/正常两种图标）
+  └─ Settings             ── SettingsView（五页）
+  两者经 NSApplicationDelegateAdaptor 绑定 AppDelegate
+```
+
+`AppDelegate.applicationDidFinishLaunching` 顺序：
+
+1. **自测模式**：启动参数含 `-PasteSelfTest` → `PasteSelfTest.run()` → `exit(0/1)`（不进 UI）。
+2. `NSApp.setActivationPolicy(.accessory)`（LSUIElement 兜底，菜单栏常驻）。
+3. `LegacyMigrator.migrateIfNeeded()`（AidoPaste → Paste 幂等迁移）。
+4. 异步 Task：`CoreStore.shared.bootstrap()` 建库 → 失败弹窗（§53 失败可见）并中止。
+5. 成功后：`ClipboardMonitor(appState:repository:).start()` → `CleanupScheduler.shared.configure(repository:)` → `GlobalShortcutManager.register(.stored)`（⌘⇧V → `WindowManager.toggleClipboardWindow()`）。
+6. 调试钩子：`-PasteShowWindowOnLaunch` 启动即显示面板。
+
+退出：`applicationShouldTerminate` → `monitor.stop()` + `CleanupScheduler.shared.stop()` → `.terminateNow`。
+
+## 6. 关键配置
+
+### 6.1 构建配置（`Paste.xcodeproj/project.pbxproj`）
+
+| 配置项 | 值 |
+| --- | --- |
+| Bundle ID / 显示名 | `com.paste.app` / Paste |
+| 版本 | Marketing 1.1.1，Build 17 |
+| Swift / 部署目标 / 架构 | Swift 6.0；macOS 15.0；Release `ARCHS=arm64` |
+| Info.plist | `GENERATE_INFOPLIST_FILE = YES`（无手写 plist）；`LSUIElement=YES`（无 Dock 图标）；分类 utilities |
+| 签名 | Manual，identity `AidoPaste Dev`（本地自签证书，`Scripts/create-signing-cert.sh` 生成），Hardened Runtime 开启，无 DEVELOPMENT_TEAM |
+| 源码归属 | `macOS/`、`Resources/` 为文件系统同步组（自动纳入，无逐文件引用） |
+| 测试 target | 无（数据层测试 = `-PasteSelfTest` 运行时钩子） |
+| Assets | `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` |
+
+### 6.2 运行时配置（UserDefaults `com.paste.app` 域）
+
+| 键 | 封装 | 默认值 |
+| --- | --- | --- |
+| `isPaused` / `appearance` / `panelSize` | `AppState` / `AppearanceMode` / `WindowManager` | false / system / 1000x280 |
+| `hotKeyCode` / `hotKeyModifiers` | `HotKeyCombo` | ⌘⇧V |
+| `defaultPasteAction` / `pastePlainText` | `PasteSettings` | activeApp / false |
+| `autoCleanupRetention` / `historyLimit` / `cleanupIntervalValue`+`Unit` | `CleanupSettings` | 30 天 / 1000 / 1 小时 |
+| `saveImages` / `saveFiles` / `saveURLs` / `maxItemSize` | `CaptureSettings` | 全开 / 50MB |
+| `excludedApps` | `ExcludedApps` | 内置密码管理器/钥匙串 6 项 |
+
+### 6.3 数据落盘位置
+
+```
+~/Library/Application Support/Paste/
+├── Database/clipboard.db (+ -wal / -shm)   # SQLite，schema v5，目录 0700、库文件 0600
+├── Images/        # 原图，按内容 SHA-256 命名
+└── Thumbnails/    # 320px PNG 缩略图
+```
+
+## 7. 构建与运行
+
+**环境**：macOS + Xcode（README 要求 Xcode 16+ / macOS 15 SDK；工程属性显示由 Xcode 26.6 创建。实际可用最低版本未确认）。纯 Swift 后无需 cargo/rustup。
+
+```bash
+# 构建（Debug）
+xcodebuild -scheme Paste -configuration Debug -derivedDataPath .build/DerivedData build
+# 产品：.build/DerivedData/Build/Products/Debug/Paste.app
+
+# 运行
+open .build/DerivedData/Build/Products/Debug/Paste.app     # 菜单栏出现剪贴板图标
+
+# 数据层自测（81 项断言，临时库，跑完退出）
+.build/DerivedData/Build/Products/Debug/Paste.app/Contents/MacOS/Paste -PasteSelfTest
+
+# 调试钩子：启动即显示主面板
+Paste -PasteShowWindowOnLaunch
+
+# 打包 DMG（Release + 签名 + dist/Paste-<版本>.dmg）
+Scripts/make-dmg.sh
+# 签名证书（一次性，幂等）：Scripts/create-signing-cert.sh → 钥匙串安装「AidoPaste Dev」
+```
+
+**运行时系统权限**：Quick Paste（合成 ⌘V）需「辅助功能」授权（未授权时应用内引导打开系统设置）；登录启动经 SMAppService；无沙箱、无网络 entitlement。
+
+## 8. 未确认项
+
+- **实际所需最低 Xcode 版本**：README 写 Xcode 16+，但工程由 Xcode 26.6 创建（`CreatedOnToolsVersion = 26.6`、`LastUpgradeCheck = 2600`）；未实测两者差异。
+- **README 中的部分历史数据**（如 81 项自测断言的准确数字、性能数据）未逐一复跑验证，以 README 记载为准。
+- `design/` 目录中 `panel-v3-settings.html` 与 `record-board-management.html` 的具体设计状态与当前实现的对应程度未逐一比对。
+- `Scripts/aidopaste-dev-cert.pem` 仅确认存在；其是否被脚本流程消费未确认（`create-signing-cert.sh` 脚本内为独立生成证书，未见引用该 pem）。
+- Swift 6 语言模式下的严格并发检查级别（如是否开启 Swift 6 严格并发错误档）未逐项核实；仅确认 `SWIFT_VERSION = 6.0`。
