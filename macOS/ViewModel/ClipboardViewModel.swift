@@ -87,6 +87,8 @@ final class ClipboardViewModel {
     private var libraryChangeCancellable: AnyCancellable?
     /// 搜索框聚焦请求计数。
     private(set) var searchFocusRequest = 0
+    /// 搜索界面重置请求计数（面板呼出时收起搜索框并清空查询词）。
+    private(set) var searchResetRequest = 0
 
     /// 加载代数：防抖搜索与实时刷新并发时，只让最新一次的结果生效。
     private var loadGeneration = 0
@@ -228,6 +230,13 @@ final class ClipboardViewModel {
 
     func requestSearchFocus() {
         searchFocusRequest += 1
+    }
+
+    /// 面板呼出时的搜索界面重置：收起搜索框、清空查询词，列表回到全量。
+    /// 呼出不再默认展开搜索框（搜索改为用户主动进入：🔍 / ⌘F / 菜单栏「搜索剪贴板」）。
+    func resetSearchUI() {
+        searchText = ""
+        searchResetRequest += 1
     }
 
     /// Quick Paste 的目标应用名（图例条「↩ 粘贴到 Safari」用）。

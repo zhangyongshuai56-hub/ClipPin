@@ -31,8 +31,10 @@ final class WindowManager: NSObject, NSWindowDelegate {
     /// （系统拒绝激活）时保留长宽限，避免呼出瞬间被误关。
     private var dismissGraceInterval: TimeInterval { panelHadKeyFocus ? 0.3 : 1.5 }
 
-    /// 显示剪贴板面板（需求 §1、§7）：出现在鼠标所在屏幕底部居中，聚焦搜索框。
-    func showClipboardWindow(focusSearch: Bool = true) {
+    /// 显示剪贴板面板（需求 §1）：出现在鼠标所在屏幕底部居中。
+    /// focusSearch 只给显式搜索入口用（菜单栏「搜索剪贴板」）：默认呼出只出列表，
+    /// 搜索框不再自动展开/聚焦，搜索改为用户主动进入（🔍 按钮 / ⌘F）。
+    func showClipboardWindow(focusSearch: Bool = false) {
         guard let repository = CoreStore.shared.repository else {
             logger.error("clipboard window requested before core is ready")
             return
@@ -75,9 +77,15 @@ final class WindowManager: NSObject, NSWindowDelegate {
             }
         }
         logger.info("panel shown: key=\(window.isKeyWindow) active=\(NSApp.isActive)")
-        // 需求 §7：呼出后搜索框默认聚焦，可直接输入
-        if focusSearch, let viewModel {
-            viewModel.requestSearchFocus()
+        // 搜索界面：默认不展开——呼出即看列表；只有显式搜索请求才展开并聚焦输入框。
+        // 未聚焦时面板仍是 key window，↑↓←→ 导航、⌘C / ⌘P / ↩ 等快捷键照常工作。
+        if let viewModel {
+            if focusSearch {
+                viewModel.requestSearchFocus()
+            } else {
+                // 收起可能残留的搜索框并清空查询词，面板每次呼出都回到默认状态
+                viewModel.resetSearchUI()
+            }
         }
         installClickOutsideObserverIfNeeded()
         installResignObserverIfNeeded()

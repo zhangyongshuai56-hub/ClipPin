@@ -40,11 +40,17 @@ struct ClipboardView: View {
         .task {
             await viewModel.loadInitial()
         }
-        // 搜索聚焦请求（面板呼出 / 菜单栏「搜索剪贴板」）：SearchField 尚未在层级里时
+        // 搜索聚焦请求（菜单栏「搜索剪贴板」）：SearchField 尚未在层级里时
         // 先展开搜索模式，SearchField.onAppear 会自动聚焦——否则请求永远无人消费
         .onChange(of: viewModel.searchFocusRequest) {
             if viewModel.searchFocusRequest > 0, !isSearching {
                 isSearching = true
+            }
+        }
+        // 面板呼出时的搜索界面重置：搜索框收起（呼出不再默认展开搜索框）
+        .onChange(of: viewModel.searchResetRequest) {
+            if viewModel.searchResetRequest > 0, isSearching {
+                isSearching = false
             }
         }
         .onAppear {
