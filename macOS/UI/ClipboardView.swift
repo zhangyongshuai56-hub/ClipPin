@@ -10,6 +10,9 @@ struct ClipboardView: View {
     @State private var keyMonitor: Any?
     /// 搜索模式：点击 🔍 后展开输入框（需求：搜索精简为按钮）。
     @State private var isSearching = false
+    /// 顶部图标按钮的悬停态（与卡片一致的反馈语言）。
+    @State private var isSearchHovered = false
+    @State private var isAddHovered = false
     /// 搜索按钮 ↔ 输入框的变形动画命名空间。
     @Namespace private var searchNamespace
     /// 新建文件夹弹窗。
@@ -61,17 +64,17 @@ struct ClipboardView: View {
             }
         }
         .onDisappear { removeKeyboardMonitor() }
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .bottom) {
+            // toast 落在底部图例条之上：原先固定 top+58 会压住顶栏 chips 与「新建」按钮
             if viewModel.feedback != .idle {
                 FeedbackToast(feedback: viewModel.feedback) {
                     viewModel.undoPendingAction()
                 }
-                .padding(.top, 58)
-                .padding(.trailing, 14)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .padding(.bottom, ClipPinDesign.Metrics.footerHeight + 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.easeOut(duration: 0.15), value: viewModel.feedback)
+        .animation(ClipPinDesign.Motion.token(ClipPinDesign.Motion.standard), value: viewModel.feedback)
         .alert("新建文件夹", isPresented: $isCreatingBoard) {
             TextField("文件夹名称", text: $newBoardName)
             Button("创建") {
@@ -143,10 +146,14 @@ struct ClipboardView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            isSearchHovered ? Color.primary.opacity(0.12) : Color.primary.opacity(0.06),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
                 }
                 .buttonStyle(.plain)
+                .onHover { isSearchHovered = $0 }
                 .accessibilityLabel("搜索")
                 .keyboardShortcut("f", modifiers: .command)
                 .matchedGeometryEffect(id: "search", in: searchNamespace)
@@ -162,16 +169,23 @@ struct ClipboardView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    .frame(width: 26, height: 26)
+                    .background(
+                        isAddHovered ? Color.primary.opacity(0.12) : Color.primary.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
             }
             .buttonStyle(.plain)
+            .onHover { isAddHovered = $0 }
             .accessibilityLabel("新建文件夹")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        // 搜索按钮 ↔ 输入框连贯变形（临界阻尼：无过冲）
-        .animation(.spring(response: 0.25, dampingFraction: 1.0), value: isSearching)
+        // 搜索按钮 ↔ 输入框连贯变形（临界阻尼：无过冲）；减弱动效时退化为快速淡入
+        .animation(
+            ClipPinDesign.Motion.token(ClipPinDesign.Motion.morph),
+            value: isSearching
+        )
     }
 
     /// 板 chips：默认「剪贴板」+ 用户创建的文件夹。
@@ -181,29 +195,53 @@ struct ClipboardView: View {
     @State private var chipsViewportWidth: CGFloat = 0
 
     private var boardChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                boardChip(
-                    title: "剪贴板",
-                    color: nil,
-                    isSelected: viewModel.selectedBoardID == nil,
-                    boardID: nil
-                )
-                ForEach(viewModel.boards) { board in
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
                     boardChip(
-                        title: board.name,
-                        color: Color(hex: board.color),
-                        isSelected: viewModel.selectedBoardID == board.id,
-                        boardID: board.id
+                        title: "剪贴板",
+                        color: nil,
+                        isSelected: viewModel.selectedBoardID == nil,
+                        boardID: nil
                     )
+                    .id("board-clipboard")
+                    ForEach(viewModel.boards) { board in
+                        boardChip(
+                            title: board.name,
+                            color: Color(hex: board.color),
+                            isSelected: viewModel.selectedBoardID == board.id,
+                            boardID: board.id
+                        )
+                        .id("board-\(board.id)")
+                    }
+                }
+                .background(WidthReader<ChipsContentWidthKey>())
+            }
+            .background(WidthReader<ChipsViewportWidthKey>())
+            .onPreferenceChange(ChipsContentWidthKey.self) { chipsContentWidth = $0 }
+            .onPreferenceChange(ChipsViewportWidthKey.self) { chipsViewportWidth = $0 }
+            .scrollDisabled(chipsContentWidth <= chipsViewportWidth)
+            // 溢出时右侧渐隐：提示「还有更多」，而不是硬生生把 chip 切断
+            .mask(
+                chipsContentWidth > chipsViewportWidth
+                    ? LinearGradient(
+                        stops: [
+                            .init(color: .black, location: 0.88),
+                            .init(color: .clear, location: 1.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    : LinearGradient(colors: [.black], startPoint: .leading, endPoint: .trailing)
+            )
+            // 选中的文件夹始终滚入视野（chips 溢出时不会被留在视口外）
+            .onChange(of: viewModel.selectedBoardID) { _, newID in
+                let target = newID.map { "board-\($0)" } ?? "board-clipboard"
+                withAnimation(ClipPinDesign.Motion.token(ClipPinDesign.Motion.standard)) {
+                    proxy.scrollTo(target, anchor: .center)
                 }
             }
-            .background(WidthReader<ChipsContentWidthKey>())
         }
-        .background(WidthReader<ChipsViewportWidthKey>())
-        .onPreferenceChange(ChipsContentWidthKey.self) { chipsContentWidth = $0 }
-        .onPreferenceChange(ChipsViewportWidthKey.self) { chipsViewportWidth = $0 }
-        .scrollDisabled(chipsContentWidth <= chipsViewportWidth)
     }
 
     /// 宽度采集器：配合 PreferenceKey 做内容/视口宽度对比。
@@ -226,42 +264,72 @@ struct ClipboardView: View {
     }
 
     private func boardChip(title: String, color: Color?, isSelected: Bool, boardID: Int64?) -> some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(color ?? Color.accentColor)
-                .frame(width: 8, height: 8)
-            Text(title)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 3)
-        .background(
-            isSelected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05),
-            in: Capsule()
-        )
-        .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.75))
-        .contentShape(Capsule())
-        .onTapGesture { viewModel.selectedBoardID = boardID }
-        .contextMenu {
-            if boardID != nil {
-                Button("重命名…") {
-                    if let board = viewModel.boards.first(where: { $0.id == boardID }) {
-                        renamingBoard = board
+        BoardChip(
+            title: title,
+            color: color,
+            isSelected: isSelected,
+            action: { viewModel.selectedBoardID = boardID },
+            contextMenu: {
+                if boardID != nil {
+                    Button("重命名…") {
+                        if let board = viewModel.boards.first(where: { $0.id == boardID }) {
+                            renamingBoard = board
+                        }
                     }
-                }
-                Button("删除文件夹", role: .destructive) {
-                    if let board = viewModel.boards.first(where: { $0.id == boardID }) {
-                        // 可撤销删除（延迟 4 秒提交，toast 可撤销）；
-                        // 此前误选 async 重载导致立即物理删除、撤销成死代码
-                        viewModel.deleteBoard(board)
+                    Button("删除文件夹", role: .destructive) {
+                        if let board = viewModel.boards.first(where: { $0.id == boardID }) {
+                            // 可撤销删除（延迟 4 秒提交，toast 可撤销）；
+                            // 此前误选 async 重载导致立即物理删除、撤销成死代码
+                            viewModel.deleteBoard(board)
+                        }
                     }
                 }
             }
+        )
+    }
+
+/// 文件夹 chip。
+/// 用 `Button` 而非 `onTapGesture`：后者不可聚焦，键盘用户与 VoiceOver 都无法切换文件夹。
+/// 键盘路径：Tab 聚焦（系统焦点环可见）→ 空格激活。
+private struct BoardChip<MenuContent: View>: View {
+    let title: String
+    let color: Color?
+    let isSelected: Bool
+    let action: () -> Void
+    @ViewBuilder let contextMenu: () -> MenuContent
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(color ?? Color.accentColor)
+                    .frame(width: 8, height: 8)
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            // 垂直内边距抬到 5：chip 整体高度 ≥ 22pt，满足可点击目标尺寸
+            .padding(.vertical, 5)
+            .background(
+                isSelected
+                    ? ClipPinDesign.Palette.selected
+                    : (isHovered ? Color.primary.opacity(0.085) : Color.primary.opacity(0.05)),
+                in: Capsule()
+            )
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary.opacity(0.75))
+            .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .contextMenu { contextMenu() }
         .accessibilityLabel("\(title)文件夹")
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isSelected ? "当前已选中" : "切换到该文件夹")
     }
+}
 
     // MARK: - 卡片流（需求 §2：单行横向）
 
@@ -270,25 +338,37 @@ struct ClipboardView: View {
             if viewModel.entries.isEmpty {
                 emptyState
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 8) {
-                            ForEach(viewModel.entries) { entry in
-                                card(entry)
+                GeometryReader { proxy in
+                    let cardWidth = ClipPinDesign.cardWidth(containerWidth: proxy.size.width)
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: ClipPinDesign.Metrics.cardSpacing) {
+                                ForEach(viewModel.entries) { entry in
+                                    card(entry)
+                                        .frame(width: cardWidth)
+                                }
+                                // 加载中：卡片流末端显示进度
+                                if viewModel.isLoading {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(width: 60)
+                                }
+                                // 分页哨兵：滚动到末尾才加载下一页，
+                                // 不再由「最后一张卡片 appear」触发（渲染驱动取数会随滚动抖动重复触发）
+                                Color.clear
+                                    .frame(width: 1, height: 1)
+                                    .onAppear {
+                                        Task { await viewModel.loadNextPageIfNeeded() }
+                                    }
                             }
-                            if viewModel.isLoading {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 60)
-                            }
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                    }
-                    .onChange(of: viewModel.selectionID) { _, newID in
-                        guard let newID else { return }
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(newID, anchor: .center)
+                        .onChange(of: viewModel.selectionID) { _, newID in
+                            guard let newID else { return }
+                            withAnimation(ClipPinDesign.Motion.token(ClipPinDesign.Motion.standard)) {
+                                proxy.scrollTo(newID, anchor: .center)
+                            }
                         }
                     }
                 }
@@ -313,11 +393,6 @@ struct ClipboardView: View {
         .contextMenu { contextMenu(for: entry) }
         // §36：拖拽导出
         .onDrag { dragProvider(for: entry) }
-        .onAppear {
-            if entry.id == viewModel.entries.last?.id {
-                Task { await viewModel.loadNextPageIfNeeded() }
-            }
-        }
     }
 
     /// 右键菜单（需求 §9/§10/§66 + 文件夹收藏）。
@@ -404,7 +479,7 @@ struct ClipboardView: View {
             Spacer(minLength: 0)
             Text("\(viewModel.entries.count)\(viewModel.canLoadMore ? "+" : "") 条记录")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(ClipPinDesign.Palette.muted)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
@@ -427,6 +502,8 @@ struct ClipboardView: View {
             hints.append(FooterHint(key: "↩", label: "复制到剪贴板"))
             hints.append(FooterHint(key: "⌘↩", label: "粘贴到当前应用"))
         }
+        // 1.1.3 起搜索改为主动进入，图例必须给出入口，否则用户无从发现
+        hints.append(FooterHint(key: "⌘F", label: "搜索"))
         hints.append(FooterHint(key: "⌘P", label: "置顶"))
         hints.append(FooterHint(key: "⌫", label: "删除"))
         hints.append(FooterHint(key: "Esc", label: "关闭"))
@@ -773,8 +850,9 @@ struct FeedbackToast: View {
                 } label: {
                     Text("撤销")
                         .font(.system(size: 12.5, weight: .bold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 10)
+                        // 垂直内边距抬到 4：撤销按钮可点击高度 ≥ 20pt
+                        .padding(.vertical, 4)
                         .background(Color.white.opacity(0.25), in: Capsule())
                 }
                 .buttonStyle(.plain)

@@ -101,9 +101,10 @@ Paste/
 | `Window/WindowManager.swift` | 284 | 面板生命周期单例：创建 `ClipboardWindow` + 注入 ViewModel；底部居中定位（鼠标所在屏）、尺寸持久化与钳制；显隐镜像动画（0.15~0.2s，代数机制防打断吞回调）；失活/点击外部关闭（宽限期分级、Quick Paste 守卫）；快捷键 toggle 语义 |
 | `Window/ClipboardWindow.swift` | 71 | `NSPanel` 子类：`.nonactivatingPanel`（Spotlight 模型，不激活应用也能成为 key）、悬浮层级、全空间可见、隐藏标题栏、毛玻璃；默认尺寸 1000×280 |
 | `ViewModel/ClipboardViewModel.swift` | 632 | `@Observable` 主视图模型：列表/分页（每页 50、滚动加载、并发加载只让最新结果生效）、防抖搜索（200ms）、键盘/网格导航、Pinboard 文件夹管理、动作分发（默认操作/粘贴/复制/删除撤销队列 4s 滚动窗/命名/编辑）、监听 `clipboardMonitorDidSaveItem`/`cleanupSchedulerDidCleanup` 防抖刷新；缩略图 NSCache（200 项/64MB） |
-| `UI/ClipboardView.swift` | 798 | 面板主界面：顶部栏（搜索按钮变形动画 + 板 chips + 新建）→ 卡片网格 → 快捷键图例条；NSEvent 本地键盘监听（↑↓←→/Enter/⌘↩/⌘C/⌘P/⌦/⌘R/⌘E/Esc，输入法组词让行）；重命名/编辑/文件夹模态 |
-| `UI/ClipboardCard.swift` | 300 | 单张卡片：内容预览（文本/URL/代码徽章/图片缩略图/文件）、来源与时间、置顶角标；单击/双击判定收口在按下手势 onEnded（绕开 SwiftUI 手势仲裁）；VoiceOver 支持 |
-| `UI/SettingsView.swift` | 573 | 设置窗口五页：通用（登录启动/外观/快捷键录制）、剪贴板（保留时长/上限/频率/立即清理/捕获开关/大小上限）、数据（导入/导出）、隐私（暂停/排除应用/辅助功能状态）、关于 |
+| `UI/DesignTokens.swift` | 82 | 设计 token：语义色（selected/pressed/hovered/resting/muted/destructive）、动效 token（按系统「减弱动态效果」自动降级）、布局尺寸（可点击目标 ≥22pt、间距 ≥8pt、卡片宽度区间 150–260pt 随面板宽度自适应） |
+| `UI/ClipboardView.swift` | 883 | 面板主界面：顶部栏（搜索按钮变形动画 + 板 chips（Button，键盘可达）+ 新建）→ 卡片网格（宽度随面板自适应 + 分页哨兵）→ 快捷键图例条（含 ⌘F 搜索）；NSEvent 本地键盘监听（↑↓←→/Enter/⌘↩/⌘C/⌘P/⌦/⌘R/⌘E/Esc，输入法组词让行）；重命名/编辑/文件夹模态 |
+| `UI/ClipboardCard.swift` | 315 | 单张卡片：内容预览（文本/URL/代码语言徽章/图片缩略图/文件）、来源与时间、置顶角标；内容顶部对齐、来源锚定底部；单击/双击判定收口在按下手势 onEnded（绕开 SwiftUI 手势仲裁）；VoiceOver 支持 |
+| `UI/SettingsView.swift` | 583 | 设置窗口五页：通用（登录启动/外观/快捷键录制，冲突错误行内展示）、剪贴板（保留时长/上限/频率/立即清理/捕获开关/大小上限）、数据（导入/导出）、隐私（暂停/排除应用/辅助功能状态）、关于 |
 | `MenuBar/MenuBarContentView.swift` | 31 | 菜单栏菜单：打开/搜索剪贴板、暂停记录、设置、退出 |
 
 ## 4. 模块依赖关系

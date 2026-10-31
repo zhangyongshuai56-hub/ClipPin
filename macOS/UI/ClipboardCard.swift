@@ -74,50 +74,59 @@ struct ClipboardCard: View {
                 Text(entry.itemType.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                if entry.itemType == .code, let language = entry.codeLanguage {
+                    // 语言徽章：代码条目额外标注语言，便于快速识别
+                    Text(language)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
+                        .accessibilityLabel("语言 \(language)")
+                }
                 Text(entry.updatedAt.shelfRelativeTime)
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(ClipPinDesign.Palette.muted)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            // 内容在头部行与来源行之间垂直 + 水平居中：窗口拉伸时上下 Spacer 均分剩余空间
-            Spacer(minLength: 0)
+            // 内容紧跟标题行（顶部对齐），来源行锚定卡片底部——避免三段各占一端、互相脱节
             bodyContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             HStack(spacing: 4) {
                 if entry.isPinned {
                     Image(systemName: "pin.fill")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ClipPinDesign.Palette.pinned)
                 }
                 Spacer(minLength: 0)
                 if let source = entry.sourceAppName {
                     Text(source)
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(ClipPinDesign.Palette.muted)
                         .lineLimit(1)
                 }
             }
         }
         .padding(8)
-        .frame(minWidth: 150, maxWidth: 150, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background {
             RoundedRectangle(cornerRadius: 10)
                 .fill(
                     isSelected
-                        ? Color.accentColor.opacity(0.10)
+                        ? ClipPinDesign.Palette.selected
                         : (isPressed
-                            ? Color.primary.opacity(0.085)
-                            : (isHovered ? Color.primary.opacity(0.055) : Color.primary.opacity(0.035)))
+                            ? ClipPinDesign.Palette.pressed
+                            : (isHovered ? ClipPinDesign.Palette.hovered : ClipPinDesign.Palette.resting))
                 )
         }
         .overlay {
+            // 选中态描边加粗到 2pt：面板是键盘优先交互（↑↓↩），选中标记必须一眼可见
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+                .strokeBorder(isSelected ? ClipPinDesign.Palette.selectedStroke : .clear, lineWidth: 2)
         }
-        .scaleEffect(isPressed ? 0.97 : 1)
-        .animation(.easeOut(duration: 0.1), value: isPressed)
+        .scaleEffect(isPressed && !ClipPinDesign.Motion.isReduced ? 0.97 : 1)
+        .animation(ClipPinDesign.Motion.token(ClipPinDesign.Motion.press), value: isPressed)
     }
 
     /// 朗读内容 = 类型 + 置顶 + 时间 + 来源 + 内容预览（缺一不可，读屏用户没有"扫一眼"）。
@@ -167,7 +176,8 @@ struct ClipboardCard: View {
             }
         case .code:
             Text(entry.preview ?? entry.textContent ?? "")
-                .font(.system(size: 11, design: .monospaced))
+                // 代码预览不低于 12pt：11pt 等宽在小卡片上已接近可读下限
+                .font(.system(size: 12, design: .monospaced))
                 .lineLimit(4)
         default:
             Text(entry.preview ?? entry.textContent ?? "")

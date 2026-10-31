@@ -280,8 +280,27 @@ private struct ClipboardSettingsView: View {
                         applyShortcut(.defaultOpenClipboard)
                     }
                 }
-                .onAppear { currentCombo = .stored }
+                // 行内错误：注册失败（如组合被占用）就地显示在快捷键行下方，
+                // 弹窗只作兜底——错误必须出现在出错的字段旁，而不是屏幕中央
+                if let message = shortcutErrorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(ClipPinDesign.Palette.destructive)
+                        Text(message)
+                            .foregroundStyle(ClipPinDesign.Palette.destructive)
+                        Spacer(minLength: 0)
+                        Button("恢复默认") {
+                            applyShortcut(.defaultOpenClipboard)
+                        }
+                        .buttonStyle(.link)
+                        .font(.footnote)
+                    }
+                    .font(.footnote)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("快捷键错误：\(message)")
+                }
             }
+            .onAppear { currentCombo = .stored }
             Section("粘贴项目") {
                 Picker("默认操作", selection: $defaultActionRaw) {
                     Text(DefaultPasteAction.activeApp.title).tag(DefaultPasteAction.activeApp.rawValue)
@@ -377,17 +396,8 @@ private struct ClipboardSettingsView: View {
         } message: {
             Text(cleanupSummary ?? "")
         }
-        .alert(
-            "无法设置快捷键",
-            isPresented: Binding(
-                get: { shortcutErrorMessage != nil },
-                set: { if !$0 { shortcutErrorMessage = nil } }
-            )
-        ) {
-            Button("好", role: .cancel) {}
-        } message: {
-            Text(shortcutErrorMessage ?? "该组合键已被其他应用占用，请换一个组合再试。")
-        }
+        // 快捷键注册失败的错误改为行内展示（见「全局快捷键」区），
+        // 这里不再弹窗——同一错误出现两次会让人以为出了两个问题
     }
 
     private func runCleanupNow() {
