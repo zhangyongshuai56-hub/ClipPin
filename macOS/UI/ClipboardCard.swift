@@ -293,7 +293,7 @@ struct ThumbnailImage: View {
 }
 
 extension Date {
-    /// Paste 风格相对时间（如「3分钟前」「昨天 14:30」回退为日期）。
+    /// 相对时间格式（如「3分钟前」「昨天 14:30」回退为日期）。
     var shelfRelativeTime: String {
         formatted(.relative(presentation: .named))
     }

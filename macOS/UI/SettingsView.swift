@@ -31,7 +31,7 @@ private struct DataSettingsView: View {
     var body: some View {
         Form {
             Section("导出") {
-                Text("把剪贴板历史与全部文件夹及其中的记录导出为一个 .pasteexport 文件（图片一并打包），拷贝到另一台电脑的 Paste 中导入即可。文件与文件夹类记录只保存引用，不打包文件本体。")
+                Text("把剪贴板历史与全部文件夹及其中的记录导出为一个 .pasteexport 文件（图片一并打包），拷贝到另一台电脑的 ClipPin 中导入即可。文件与文件夹类记录只保存引用，不打包文件本体。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button("导出全部内容…") { chooseExportDestination() }
@@ -87,7 +87,7 @@ private struct DataSettingsView: View {
         // 直接在默认文件名里带 .pasteexport（导入面板不过滤类型，由解析层校验）
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd"
-        panel.nameFieldStringValue = "Paste-导出-\(formatter.string(from: Date())).pasteexport"
+        panel.nameFieldStringValue = "ClipPin-导出-\(formatter.string(from: Date())).pasteexport"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         isBusy = true
         Task {
@@ -111,7 +111,7 @@ private struct DataSettingsView: View {
         // 不按 UTI 过滤：运行时注册的自定义类型对文件面板的扩展名匹配不可靠，
         // 会把 .pasteexport（乃至无扩展名的旧导出文件）挡成灰色不可选。
         // 放开显示、由解析层严格校验（invalidDocument）。
-        panel.message = "选择 Paste 导出的备份文件（.pasteexport）"
+        panel.message = "选择 ClipPin 导出的备份文件（.pasteexport）"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -142,7 +142,7 @@ private struct GeneralSettingsView: View {
         Form {
             Section("启动") {
                 Toggle(
-                    "登录时启动 Paste",
+                    "登录时启动 ClipPin",
                     isOn: Binding(
                         get: { launchAtLogin },
                         set: { desired in
@@ -471,7 +471,7 @@ private struct AboutSettingsView: View {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text("Paste")
+            Text("ClipPin")
                 .font(.title2).bold()
             Text("版本 \(BundleInfo.version)（\(BundleInfo.build)）")
                 .foregroundStyle(.secondary)

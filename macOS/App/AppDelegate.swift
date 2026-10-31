@@ -7,8 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let globalShortcutManager = GlobalShortcutManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // 原生数据层自测：-PasteSelfTest 在临时库上跑关键断言后退出（退出码 0 / 1）
-        if ProcessInfo.processInfo.arguments.contains("-PasteSelfTest") {
+        // 原生数据层自测：-ClipPinSelfTest 在临时库上跑关键断言后退出（退出码 0 / 1）
+        if ProcessInfo.processInfo.arguments.contains("-ClipPinSelfTest") {
             let passed = PasteSelfTest.run()
             exit(passed ? 0 : 1)
         }
@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let error = CoreStore.shared.startupError {
                     let alert = NSAlert()
                     alert.alertStyle = .critical
-                    alert.messageText = "Paste 数据库初始化失败"
+                    alert.messageText = "ClipPin 数据库初始化失败"
                     alert.informativeText = error.errorDescription ?? "请重启应用再试。"
                     alert.addButton(withTitle: "好")
                     alert.runModal()
@@ -39,8 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             registerGlobalShortcut()
 
-            // 调试 / 自动化测试钩子：传入 -PasteShowWindowOnLaunch 时启动即显示主窗口
-            if ProcessInfo.processInfo.arguments.contains("-PasteShowWindowOnLaunch") {
+            // 调试 / 自动化测试钩子：传入 -ClipPinShowWindowOnLaunch 时启动即显示主窗口
+            if ProcessInfo.processInfo.arguments.contains("-ClipPinShowWindowOnLaunch") {
                 WindowManager.shared.showClipboardWindow()
             }
         }

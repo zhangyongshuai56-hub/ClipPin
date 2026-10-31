@@ -3,7 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import CryptoKit
 
-/// 原生数据层自测（-PasteSelfTest）：在临时库上运行关键断言后退出（退出码 0 / 1）。
+/// 原生数据层自测（-ClipPinSelfTest）：在临时库上运行关键断言后退出（退出码 0 / 1）。
 /// 覆盖原 Rust 测试套的关键路径：迁移、去重 touch、搜索（FTS / LIKE / 软删除过滤）、
 /// Pin、软删除与移出文件夹物理删除、编辑重分类与合并、文件夹 CRUD、
 /// 清理（上限 / 孤儿文件）、分类器、统计、图片转存、导入导出往返。

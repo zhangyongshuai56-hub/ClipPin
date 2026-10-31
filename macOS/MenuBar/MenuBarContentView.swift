@@ -24,7 +24,7 @@ struct MenuBarContentView: View {
             // 当前前台应用的窗口盖住（且无 Dock 图标、不在 ⌘Tab 里，难以找回）
             NSApp.activate(ignoringOtherApps: true)
         }
-        Button("退出 Paste") {
+        Button("退出 ClipPin") {
             NSApp.terminate(nil)
         }
     }

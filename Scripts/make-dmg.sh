@@ -22,15 +22,15 @@ if [ -z "${SIGN_IDENTITY:-}" ]; then
 fi
 
 # 从工程读取版本号
-VERSION=$(grep -m1 'MARKETING_VERSION' "$SRCROOT/Paste.xcodeproj/project.pbxproj" | sed 's/.*= \(.*\);.*/\1/')
+VERSION=$(grep -m1 'MARKETING_VERSION' "$SRCROOT/ClipPin.xcodeproj/project.pbxproj" | sed 's/.*= \(.*\);.*/\1/')
 
-xcodebuild -project "$SRCROOT/Paste.xcodeproj" \
-  -scheme Paste -configuration Release \
+xcodebuild -project "$SRCROOT/ClipPin.xcodeproj" \
+  -scheme ClipPin -configuration Release \
   -derivedDataPath "$SRCROOT/.build/DerivedData" \
   CODE_SIGN_IDENTITY="$SIGN_IDENTITY" DEVELOPMENT_TEAM="" \
   build
 
-APP="$SRCROOT/.build/DerivedData/Build/Products/Release/Paste.app"
+APP="$SRCROOT/.build/DerivedData/Build/Products/Release/ClipPin.app"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
@@ -38,7 +38,7 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 mkdir -p "$SRCROOT/dist"
-DMG="$SRCROOT/dist/Paste-$VERSION.dmg"
+DMG="$SRCROOT/dist/ClipPin-$VERSION.dmg"
 rm -f "$DMG"
-hdiutil create -volname "Paste $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" | tail -1
+hdiutil create -volname "ClipPin $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" | tail -1
 echo "DMG ready: $DMG (version $VERSION)"

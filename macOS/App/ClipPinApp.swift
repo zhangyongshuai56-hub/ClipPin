@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct PasteApp: App {
+struct ClipPinApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

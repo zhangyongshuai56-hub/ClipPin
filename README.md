@@ -1,9 +1,9 @@
-# Paste
+# ClipPin
 
-本地优先的 macOS 原生剪贴板管理器。0.2.0 起由 AidoPaste 改名为 Paste，
-首次启动自动迁移旧数据目录（`~/Library/Application Support/AidoPaste`）与用户设置。
+本地优先的 macOS 原生剪贴板管理器。早期名为 AidoPaste（0.2.0 起改名 Paste），
+1.2.0 起定名 **ClipPin**；首次启动自动迁移旧数据目录（`~/Library/Application Support/AidoPaste`）与用户设置。
 
-![Paste 面板](design/panel-preview.png)
+![ClipPin 面板](design/panel-preview.png)
 
 ## 技术架构
 
@@ -12,18 +12,18 @@
 - **存储**：系统 libsqlite3 直连（FTS5 trigram 全文搜索），图片与缩略图存文件系统
 - **哈希**：CryptoKit SHA-256，禁止 HTTP / WebSocket 方案
 
-数据层关键路径由 `-PasteSelfTest` 自测覆盖（102 项断言，临时库运行后退出）：
-`Paste.app/Contents/MacOS/Paste -PasteSelfTest`
+数据层关键路径由 `-ClipPinSelfTest` 自测覆盖（102 项断言，临时库运行后退出）：
+`ClipPin.app/Contents/MacOS/ClipPin -ClipPinSelfTest`
 
 ## 构建
 
 环境要求：Xcode 16+（macOS 15 SDK）。
 
 ```bash
-xcodebuild -scheme Paste -configuration Debug -derivedDataPath .build/DerivedData build
+xcodebuild -scheme ClipPin -configuration Debug -derivedDataPath .build/DerivedData build
 ```
 
-产品输出：`.build/DerivedData/Build/Products/Debug/Paste.app`
+产品输出：`.build/DerivedData/Build/Products/Debug/ClipPin.app`
 
 打包 DMG：`Scripts/make-dmg.sh`（自动优先使用本地「AidoPaste Dev」签名证书，
 未安装时回退 ad-hoc；证书生成见 `Scripts/create-signing-cert.sh`）。
@@ -142,6 +142,17 @@ Phase 13 已完成（UI 打磨）：
 全部 13 个 Phase 完成。技术栈：SwiftUI + AppKit + Rust Core + SQLite(FTS5) + UniFFI；
 65 个 Rust 测试；四种内容类型；本地优先，无网络依赖。
 
+## 1.2.0 品牌更名：Paste → ClipPin
+
+- 对外名称统一为 **ClipPin**（应用显示名、面板窗口标题、菜单栏、设置页、关于页、
+  导出文件名前缀、GitHub 仓库名与描述），避免与同名商业剪贴板软件混淆
+- 工程标识同步更名：target / 产品 `ClipPin.app` / scheme / `ClipPin.xcodeproj` / 打包 DMG 名
+- 兼容性保留：bundle id 仍为 `com.paste.app`、数据目录仍为 `~/Library/Application Support/Paste`，
+  现有用户数据、设置与辅助功能授权无需迁移或重新授予
+- 自测与调试参数更名：`-ClipPinSelfTest`、`-ClipPinShowWindowOnLaunch`
+- 内部类型名（`PasteDatabase` / `PasteService` 等）与 `.pasteexport` 导出格式保持不变，
+  避免破坏既有备份与历史记录
+
 ## 1.1.3 呼出面板不再自动展开搜索框
 
 - 移除「呼出面板即自动展开并聚焦搜索框」的默认行为：⌘⇧V 与菜单栏「打开剪贴板」
@@ -173,7 +184,7 @@ Phase 13 已完成（UI 打磨）：
   移除每次构建都会执行的 "Build Rust Core" 脚本阶段
 - **schema 与语义逐行对拍移植**（v1→v4 迁移、24 个仓储方法签名不变、去重 / 分类 / 搜索 /
   清理 / 文件夹行为一致），现有数据库原地打开，用户数据无损（实测 150+ 条真实数据）
-- 新增 `-PasteSelfTest` 自测钩子：81 项断言覆盖迁移 / 去重 / FTS+LIKE 搜索 / 软删除与
+- 新增 `-ClipPinSelfTest` 自测钩子：81 项断言覆盖迁移 / 去重 / FTS+LIKE 搜索 / 软删除与
   移出文件夹清除 / 编辑合并 / 清理 / 分类器 / 统计 / 图片转存（等价于退役的 65 个 Rust 测试的关键路径）
 - 删除：rust-core/、Scripts/build-rust-core.sh、UniFFI 生成代码与链接配置
 
@@ -292,7 +303,7 @@ Phase 13 已完成（UI 打磨）：
 - 交互：输入法组词中 Enter / Esc 交还输入法，候选确认不再误触粘贴或清空搜索
 - 架构：Quick Paste 编排（快照 / 激活 / ⌘V / 恢复）收口到 PasteService，ViewModel 经构造注入依赖
 
-## Paste 式底部面板（交互升级，见 design/panel-preview.png）
+## 底部快速面板（交互升级，见 design/panel-preview.png）
 
 - ⌘⇧V 在当前屏幕**底部居中**呼出面板（鼠标所在屏优先，可拖拽调宽高 700×300 起，尺寸跨重启记忆）
 - 布局：搜索栏 → 分类 tabs（全部/收藏/文本/图片/链接/文件，带计数）→ 卡片网格 → 快捷键提示条

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 剪贴板底部快速操作面板（需求 §20，参考 Paste 界面）：
+/// 剪贴板底部快速操作面板（需求 §20，参考同类剪贴板面板界面）：
 /// 顶部栏（搜索按钮 + Pinboard 文件夹 chips + 新建）→ 单行卡片流 → 快捷键图例条。
 struct ClipboardView: View {
     @State private var viewModel: ClipboardViewModel
@@ -263,7 +263,7 @@ struct ClipboardView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    // MARK: - 卡片流（需求 §2：单行横向，参考 Paste）
+    // MARK: - 卡片流（需求 §2：单行横向）
 
     private var shelfArea: some View {
         Group {

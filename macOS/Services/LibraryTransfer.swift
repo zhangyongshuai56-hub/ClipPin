@@ -91,8 +91,8 @@ enum LibraryTransferError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidDocument: "不是有效的 Paste 导出文件。"
-        case .unsupportedVersion(let version): "导出文件版本过新（v\(version)），请先升级 Paste 再导入。"
+        case .invalidDocument: "不是有效的 ClipPin 导出文件。"
+        case .unsupportedVersion(let version): "导出文件版本过新（v\(version)），请先升级 ClipPin 再导入。"
         case .fileTooLarge(let size): "导出文件过大（\(size / 1_048_576) MB），超过导入上限。"
         case .coreUnavailable: "数据库尚未就绪，请稍后重试。"
         }
