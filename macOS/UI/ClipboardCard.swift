@@ -66,13 +66,17 @@ struct ClipboardCard: View {
 
     /// 卡片视觉层：与 body 的手势 / 无障碍修饰链分开，避免超长表达式拖垮类型检查。
     private var cardSurface: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 10) {
+            // 眉标行：类型 + 时间为「元信息」，必须明显弱于正文。
+            // 之前类型名用 .subheadline.weight(.medium)（13pt），与正文同为 13pt、
+            // 仅隔 5pt，元信息与内容被糊成一段；现在字号更小、色更弱、离得更远。
+            HStack(spacing: 4) {
                 Image(systemName: entry.itemType.symbolName)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 Text(entry.itemType.title)
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                 if entry.itemType == .code, let language = entry.codeLanguage {
                     // 语言徽章：代码条目额外标注语言，便于快速识别
@@ -84,13 +88,13 @@ struct ClipboardCard: View {
                         .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 3))
                         .accessibilityLabel("语言 \(language)")
                 }
+                Spacer(minLength: 4)
                 Text(entry.updatedAt.shelfRelativeTime)
                     .font(.caption)
                     .foregroundStyle(ClipPinDesign.Palette.muted)
                     .lineLimit(1)
-                Spacer(minLength: 0)
             }
-            // 内容紧跟标题行（顶部对齐），来源行锚定卡片底部——避免三段各占一端、互相脱节
+            // 内容紧跟眉标行（顶部对齐），来源行锚定卡片底部——正文是卡片唯一主体
             bodyContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             HStack(spacing: 4) {
@@ -303,8 +307,13 @@ struct ThumbnailImage: View {
 }
 
 extension Date {
-    /// 相对时间格式（如「3分钟前」「昨天 14:30」回退为日期）。
+    /// 相对时间格式（如「3 分钟前」「昨天 14:30」回退为日期）。
+    /// 固定中文 locale：界面文案全部为中文，若跟随系统语言会出现
+    /// 「13 seconds ago」这类中英混排（实测英文系统下即如此）。
     var shelfRelativeTime: String {
-        formatted(.relative(presentation: .named))
+        Date.RelativeFormatStyle(
+            presentation: .named,
+            locale: Locale(identifier: "zh_CN")
+        ).format(self)
     }
 }
