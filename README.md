@@ -3,6 +3,8 @@
 本地优先的 macOS 原生剪贴板管理器。0.2.0 起由 AidoPaste 改名为 Paste，
 首次启动自动迁移旧数据目录（`~/Library/Application Support/AidoPaste`）与用户设置。
 
+![Paste 面板](design/panel-preview.png)
+
 ## 技术架构
 
 - **前端**：SwiftUI + AppKit，macOS 15.0+，仅支持 Apple Silicon
@@ -308,3 +310,12 @@ Phase 13 已完成（UI 打磨）：
 - Enter / 双击执行默认操作；⌘Enter 始终粘贴到当前应用；⌘C 复制到剪贴板
 - DB schema v2：boards 表 + clipboard_items.board_id；v3：content_hash 唯一索引（迁移自动执行）
 
+## 许可证
+
+[MIT](LICENSE) © 2026 zhangyongshuai56-hub
+
+## 隐私说明
+
+- 全部数据仅保存在本机（`~/Library/Application Support/Paste`），应用不发起任何网络请求
+- 内置排除密码管理器与钥匙串；`org.nspasteboard` 标记的机密/临时内容一律不记录
+- 日志只记录 id / 大小 / 耗时，不记录剪贴板内容原文
