@@ -11,7 +11,13 @@
     <img alt="Swift" src="https://img.shields.io/badge/Swift-6.0-orange?logo=swift&logoColor=white" />
     <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-arm64-lightgrey?logo=apple&logoColor=white" />
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
-    <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-brightgreen" />
+  </p>
+
+  <p>
+    <a href="https://github.com/zhangyongshuai56-hub/ClipPin/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/zhangyongshuai56-hub/ClipPin?style=flat&logo=github" /></a>
+    <a href="https://github.com/zhangyongshuai56-hub/ClipPin/network/members"><img alt="GitHub Forks" src="https://img.shields.io/github/forks/zhangyongshuai56-hub/ClipPin?style=flat&logo=github" /></a>
+    <a href="https://github.com/zhangyongshuai56-hub/ClipPin/releases"><img alt="GitHub Downloads" src="https://img.shields.io/github/downloads/zhangyongshuai56-hub/ClipPin/total?style=flat&logo=github" /></a>
+    <a href="https://github.com/zhangyongshuai56-hub/ClipPin/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/zhangyongshuai56-hub/ClipPin?style=flat&logo=github" /></a>
   </p>
 
   <p>
