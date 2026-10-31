@@ -1,7 +1,6 @@
 # ClipPin
 
-本地优先的 macOS 原生剪贴板管理器。早期名为 AidoPaste（0.2.0 起改名 Paste），
-1.2.0 起定名 **ClipPin**；首次启动自动迁移旧数据目录（`~/Library/Application Support/AidoPaste`）与用户设置。
+本地优先的 macOS 原生剪贴板管理器。
 
 ![ClipPin 面板](design/panel-preview.png)
 
