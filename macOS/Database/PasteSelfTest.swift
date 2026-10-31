@@ -118,7 +118,7 @@ final class PasteSelfTest: @unchecked Sendable {
         expect(urlEntry.url == "https://developer.apple.com/design/?x=1", "URL normalized to url field")
 
         // JSON 捕获 → code + metadata.language
-        let jsonEntry = try database.createItem(textEntry(#"{"name": "Paste", "version": 1}"#)).entry
+        let jsonEntry = try database.createItem(textEntry(#"{"name": "ClipPin", "version": 1}"#)).entry
         expect(jsonEntry.itemType == .code, "JSON classified as code")
         expect(jsonEntry.codeLanguage == "json", "JSON language metadata")
 
@@ -385,7 +385,7 @@ final class PasteSelfTest: @unchecked Sendable {
         expect(!isStandaloneURL("https://"), "URL: empty host rejected")
 
         expect(classifyText("https://apple.com") == .url, "classify url")
-        expect(classifyText(#"{"name": "Paste", "version": 1}"#) == .code, "classify JSON")
+        expect(classifyText(#"{"name": "ClipPin", "version": 1}"#) == .code, "classify JSON")
         expect(detectCodeLanguage(#"{"a": [1, 2, 3]}"#) == "json", "JSON language")
         expect(detectCodeLanguage(#"{"a": "#) == nil, "incomplete JSON not code")
         expect(classifyText("#!/bin/bash\necho hi") == .code, "shebang is code")
